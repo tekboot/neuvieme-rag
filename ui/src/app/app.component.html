@@ -1,0 +1,179 @@
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="title">EXPLORER</div>
+      <button class="btn" (click)="toggleImportMenu()">Import ▾</button>
+    </div>
+
+    <div class="import-menu" *ngIf="importMenuOpen()">
+      <button class="menu-item" (click)="triggerDeviceImport()">📥 From device</button>
+      <button class="menu-item" (click)="openGithubModal()">🐙 From GitHub</button>
+    </div>
+
+    <!-- hidden file inputs -->
+    <input #fileInput type="file" multiple (change)="onDeviceFilesSelected($event)" hidden />
+    <input #folderInput type="file" multiple webkitdirectory (change)="onDeviceFolderSelected($event)" hidden />
+
+    <div class="sidebar-actions">
+      <button class="btn secondary" (click)="openDeviceFilePicker(fileInput)">Pick files</button>
+      <button class="btn secondary" (click)="openDeviceFolderPicker(folderInput)">Pick folder</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="tree-wrap">
+      <app-file-tree
+        [nodes]="fileTree()"
+        [selectedPath]="selectedFilePath()"
+        [selectionEnabled]="contextMode() === 'selected'"
+        (selectFile)="onSelectFile($event)"
+        (toggleSelect)="toggleFileSelection($event)"
+        (refreshGithub)="refreshGithubFolder($event)"
+      />
+    </div>
+
+    <div class="selected-footer" *ngIf="selectedFile()">
+      <div class="label">Selected</div>
+      <div class="path">{{ selectedFilePath() }}</div>
+
+      <div class="selected-actions">
+        <button class="btn secondary danger" (click)="deleteSelected()">Delete</button>
+
+        <button class="btn secondary"
+          *ngIf="selectedFile()?.type === 'folder' && selectedFile()?.source === 'github' && selectedFile()?.githubMeta"
+          (click)="refreshGithubFolder(selectedFile()!)">
+          Refresh GitHub
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Chat -->
+  <main class="main">
+    <header class="main-header">
+      <div class="h-title">AI Chat</div>
+      <div class="h-sub">
+        <span class="context-label">Context:</span>
+        <button
+          class="mode-btn"
+          [class.active]="contextMode() === 'all'"
+          (click)="contextMode.set('all')"
+        >All files</button>
+        <button
+          class="mode-btn"
+          [class.active]="contextMode() === 'selected'"
+          (click)="contextMode.set('selected')"
+        >Selected files</button>
+        <span class="pill" *ngIf="contextMode() === 'selected'">{{ selectedFilePaths().length }} selected</span>
+      </div>
+    </header>
+
+    <section class="chat">
+      <div class="messages" #msgBox>
+        <div class="msg" *ngFor="let m of messages()" [class.user]="m.role === 'user'"
+          [class.assistant]="m.role === 'assistant'">
+          <div class="meta">
+            <span class="role">{{ m.role }}</span>
+            <span class="dot">•</span>
+            <span class="time">{{ formatTime(m.ts) }}</span>
+          </div>
+          <div class="bubble">{{ m.content }}</div>
+        </div>
+
+        <div class="typing" *ngIf="sending()">
+          <div class="meta">
+            <span class="role">assistant</span><span class="dot">•</span><span class="time">typing…</span>
+          </div>
+          <div class="bubble">…</div>
+        </div>
+      </div>
+
+      <form class="composer" (submit)="send($event)">
+        <textarea [(ngModel)]="draft" name="draft" class="input" placeholder="Ask the AI… (Shift+Enter for newline)"
+          (keydown)="handleKeydown($event)"></textarea>
+
+        <div class="composer-actions">
+          <button type="button" class="btn ghost" (click)="clearChat()">Clear</button>
+          <button type="submit" class="btn primary" [disabled]="sending() || !draft.trim()">Send</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <!-- GitHub Modal -->
+  <div class="backdrop" *ngIf="githubModalOpen()" (click)="closeGithubModal()"></div>
+  <div class="modal" *ngIf="githubModalOpen()">
+    <div class="modal-header">
+      <div class="modal-title">Import from GitHub</div>
+      <button class="icon-btn" (click)="closeGithubModal()">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <label class="field">
+        <span>Owner</span>
+        <input class="text" [(ngModel)]="ghOwner" name="ghOwner" placeholder="e.g. octocat" />
+      </label>
+
+      <label class="field">
+        <span>Repo</span>
+        <input class="text" [(ngModel)]="ghRepo" name="ghRepo" placeholder="e.g. hello-world" />
+      </label>
+
+      <label class="field">
+        <span>Branch (optional)</span>
+        <input class="text" [(ngModel)]="ghBranch" name="ghBranch" placeholder="main" />
+      </label>
+
+      <label class="field">
+        <span>Sub-path (optional)</span>
+        <input class="text" [(ngModel)]="ghSubPath" name="ghSubPath" placeholder="src/app" />
+      </label>
+
+      <div class="hint">
+        This UI expects your backend endpoint <code>/api/github/import</code> to return a <code>FileNode[]</code> tree.
+      </div>
+
+      <div class="error" *ngIf="ghError()">{{ ghError() }}</div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn secondary" (click)="closeGithubModal()">Cancel</button>
+
+      <button class="btn secondary" *ngIf="!githubConnected()" (click)="connectGithub()" [disabled]="checkingGithub()">
+        {{ checkingGithub() ? 'Checking…' : 'Connect GitHub' }}
+      </button>
+
+      <button class="btn primary" *ngIf="githubConnected()" [disabled]="ghLoading()" (click)="importFromGithub()">
+        {{ ghLoading() ? 'Importing…' : 'Import' }}
+      </button>
+    </div>
+  </div>
+
+  <!-- Preview Modal -->
+  <div class="backdrop" *ngIf="previewOpen()" (click)="closePreview()"></div>
+  <div class="modal preview" *ngIf="previewOpen()">
+    <div class="modal-header">
+      <div class="modal-title">Preview: {{ previewTitle() }}</div>
+      <button class="icon-btn" (click)="closePreview()">✕</button>
+    </div>
+
+    <div class="modal-body preview-body">
+      <div class="error" *ngIf="previewError()">{{ previewError() }}</div>
+
+      <ng-container [ngSwitch]="previewKind()">
+        <pre class="preview-text" *ngSwitchCase="'text'">{{ previewText() }}</pre>
+
+        <iframe *ngSwitchCase="'pdf'" class="preview-frame" [src]="previewUrl()" title="PDF preview"></iframe>
+
+        <img *ngSwitchCase="'image'" class="preview-image" [src]="previewUrl()" alt="image preview" />
+
+        <div *ngSwitchDefault class="hint">Preview not available.</div>
+      </ng-container>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn secondary" (click)="closePreview()">Close</button>
+    </div>
+  </div>
+</div>
