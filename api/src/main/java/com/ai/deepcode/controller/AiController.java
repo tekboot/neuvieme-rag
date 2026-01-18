@@ -1,26 +1,21 @@
 package com.ai.deepcode.controller;
 
-import com.ai.deepcode.dto.ChatRequest;
-import com.ai.deepcode.dto.ChatResponse;
-import com.ai.deepcode.service.GithubFileService;
-import com.ai.deepcode.service.OllamaService;
-import com.ai.deepcode.service.WorkspaceStore;
+import com.ai.deepcode.dto.*;
+import com.ai.deepcode.entity.IndexStatus;
+import com.ai.deepcode.entity.IndexingStatus;
+import com.ai.deepcode.repository.IndexStatusRepository;
+import com.ai.deepcode.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/ai")
-@CrossOrigin(
-        origins = "http://localhost:4200",
-        allowCredentials = "true"
-)
+@CrossOrigin(origins = "http://localhost:4200", allowCredentials = "true")
 public class AiController {
 
     private static final Logger log = LoggerFactory.getLogger(AiController.class);
@@ -33,37 +28,47 @@ public class AiController {
             "zip", "tar", "gz", "rar", "7z",
             "exe", "dll", "so", "dylib",
             "mp3", "mp4", "avi", "mov", "wav",
-            "ttf", "otf", "woff", "woff2", "eot"
-    );
+            "ttf", "otf", "woff", "woff2", "eot");
 
     private final OllamaService ollamaService;
     private final WorkspaceStore workspaceStore;
     private final GithubFileService githubFileService;
+    private final VectorSearchService vectorSearchService;
+    private final IndexingService indexingService;
+    private final IndexStatusRepository indexStatusRepository;
 
-    public AiController(OllamaService ollamaService, WorkspaceStore workspaceStore, GithubFileService githubFileService) {
+    public AiController(OllamaService ollamaService, WorkspaceStore workspaceStore,
+            GithubFileService githubFileService, VectorSearchService vectorSearchService,
+            IndexingService indexingService, IndexStatusRepository indexStatusRepository) {
         this.ollamaService = ollamaService;
         this.workspaceStore = workspaceStore;
         this.githubFileService = githubFileService;
+        this.vectorSearchService = vectorSearchService;
+        this.indexingService = indexingService;
+        this.indexStatusRepository = indexStatusRepository;
     }
 
     @PostMapping("/chat")
     public ChatResponse chat(@RequestBody ChatRequest request) {
-        log.info("[AiController] Received chat request: message='{}', context.mode='{}'",
+        log.info("[AiController] Received chat request: message='{}', context.mode='{}', model='{}'",
                 truncate(request.message(), 50),
-                request.context() != null ? request.context().mode() : "null");
+                request.context() != null ? request.context().mode() : "null",
+                request.model() != null ? request.model() : "default");
 
         if (request.context() != null && request.context().files() != null) {
             log.info("[AiController] Context files count: {}", request.context().files().size());
             for (var f : request.context().files()) {
                 log.info("[AiController]   - source={}, path={}, github={}",
-                        f.source(), f.path(), f.github() != null ? f.github().owner() + "/" + f.github().repo() : "null");
+                        f.source(), f.path(),
+                        f.github() != null ? f.github().owner() + "/" + f.github().repo() : "null");
             }
         }
 
         String prompt = buildPrompt(request);
         log.info("[AiController] Built prompt length: {} chars", prompt.length());
 
-        String answer = ollamaService.generate(prompt);
+        // Use the selected model or fall back to default
+        String answer = ollamaService.generate(prompt, request.model());
         return new ChatResponse(answer);
     }
 
@@ -194,37 +199,29 @@ public class AiController {
                 %s
 
                 Provide a helpful, specific answer based on the actual file contents above. Quote specific lines when relevant.
-                """.formatted(contextBuilder.toString(), failureNote, userMessage);
+                """
+                .formatted(contextBuilder.toString(), failureNote, userMessage);
     }
 
-    /**
-     * Fetch file content from either device storage or GitHub.
-     * For GitHub files, this may throw ResponseStatusException (401, 403, 404, 500)
-     * which should propagate to the client.
-     */
     private String fetchFileContent(ChatRequest.ContextFile file) {
         if ("device".equals(file.source())) {
-            // Fetch from local workspace store
-            String content = workspaceStore.getFileAsString(file.path());
-            if (content != null) {
-                log.debug("[AiController] Loaded device file: {} ({} chars)", file.path(), content.length());
-            }
-            return content;
+            return workspaceStore.getFileAsString(file.path());
         }
-
         if ("github".equals(file.source()) && file.github() != null) {
-            // Fetch from GitHub API - may throw ResponseStatusException
             ChatRequest.GithubRef gh = file.github();
-            return githubFileService.getFileContent(
-                    gh.owner(),
-                    gh.repo(),
-                    file.path(),
-                    gh.branch(),
-                    gh.subPath()
-            );
+            return githubFileService.getFileContent(gh.owner(), gh.repo(), file.path(), gh.branch(), gh.subPath());
         }
+        return null;
+    }
 
-        log.warn("[AiController] Unknown source or missing github ref: {}", file.source());
+    private String fetchFileContent(RagFileRef file) {
+        if ("device".equals(file.source())) {
+            return workspaceStore.getFileAsString(file.path());
+        }
+        if ("github".equals(file.source()) && file.github() != null) {
+            GithubRef gh = file.github();
+            return githubFileService.getFileContent(gh.owner(), gh.repo(), file.path(), gh.branch(), gh.subPath());
+        }
         return null;
     }
 
@@ -236,15 +233,195 @@ public class AiController {
     }
 
     private boolean isBinaryFile(String path) {
-        if (path == null) return true;
+        if (path == null)
+            return true;
         int lastDot = path.lastIndexOf('.');
-        if (lastDot < 0) return false;
+        if (lastDot < 0)
+            return false;
         String ext = path.substring(lastDot + 1).toLowerCase();
         return BINARY_EXTENSIONS.contains(ext);
     }
 
     private String truncate(String s, int maxLen) {
-        if (s == null) return "null";
+        if (s == null)
+            return "null";
         return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
+    }
+
+    /**
+     * RAG-augmented chat endpoint.
+     * Uses vector similarity search to find relevant code chunks,
+     * then includes them as context for the LLM.
+     *
+     * POST /api/ai/chat-rag
+     */
+    @PostMapping("/chat-rag")
+    public RagChatResponse chatWithRag(@RequestBody RagChatRequest request) {
+        log.info("[AiController] RAG chat request: strategy={}, message='{}', projects={}, topK={}, model='{}'",
+                request.strategy(),
+                truncate(request.message(), 50),
+                request.projectIds() != null ? request.projectIds().size() : 0,
+                request.topK(),
+                request.model() != null ? request.model() : "default");
+
+        // VALIDATION
+        if (request.message() == null || request.message().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "MISSING_MESSAGE: Message is required");
+        }
+
+        if (request.projectIds() == null || request.projectIds().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "MISSING_PROJECTS: At least one project ID is required");
+        }
+
+        if ("selected".equalsIgnoreCase(request.mode()) && (request.files() == null || request.files().isEmpty())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "MISSING_FILES: Mode 'selected' requires at least one file");
+        }
+
+        if ("use_existing".equalsIgnoreCase(request.strategy())
+                && (request.projectIds() == null || request.projectIds().isEmpty())) {
+            // redundant due to check above, but following user requirement literally
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "MISSING_PROJECTS: Strategy 'use_existing' requires projectIds");
+        }
+
+        List<String> logEntries = new ArrayList<>();
+        boolean usedExisting = false;
+        boolean indexedNow = false;
+        int filesIndexedTotal = 0;
+        int chunksCreatedTotal = 0;
+
+        UUID mainProjectId = request.projectIds().get(0);
+        String embedModel = request.embedModel() != null ? request.embedModel() : "nomic-embed-text";
+        int chunkSize = request.chunkSize() != null ? request.chunkSize() : 1000;
+        int chunkOverlap = request.chunkOverlap() != null ? request.chunkOverlap() : 200;
+
+        if ("use_existing".equalsIgnoreCase(request.strategy())) {
+            logEntries.add("Checking existing index for project: " + mainProjectId);
+            IndexStatus status = indexStatusRepository.findByProjectId(mainProjectId).orElse(null);
+
+            if (status != null && status.getStatus() == IndexingStatus.COMPLETED) {
+                boolean modelMatch = embedModel.equals(status.getEmbedModel());
+                boolean chunkMatch = chunkSize == status.getChunkSize() && chunkOverlap == status.getChunkOverlap();
+
+                if (modelMatch && chunkMatch) {
+                    logEntries.add("Matching index found: " + status.getTotalChunks() + " chunks, model="
+                            + status.getEmbedModel());
+                    usedExisting = true;
+                } else {
+                    String reason = !modelMatch
+                            ? "Model mismatch (request=" + embedModel + ", stored=" + status.getEmbedModel() + ")"
+                            : "Chunk settings mismatch";
+                    logEntries.add("Index found but settings mismatch: " + reason);
+                }
+            } else {
+                logEntries.add("No completed index found for project.");
+            }
+        }
+
+        if (!usedExisting) {
+            logEntries.add("Triggering automatic indexing...");
+
+            Map<String, String> fileContents = new HashMap<>();
+            List<RagFileRef> filesToFetch = ("selected".equalsIgnoreCase(request.mode()) && request.files() != null)
+                    ? request.files()
+                    : getAllProjectFiles(mainProjectId);
+
+            logEntries.add("Fetching content for " + filesToFetch.size() + " files...");
+            for (RagFileRef file : filesToFetch) {
+                try {
+                    String content = fetchFileContent(file);
+                    if (content != null && !content.isEmpty()) {
+                        fileContents.put(file.path(), content);
+                    }
+                } catch (Exception e) {
+                    log.error("[AiController] Error fetching {}: {}", file.path(), e.getMessage());
+                }
+            }
+
+            if (fileContents.isEmpty()) {
+                logEntries.add("No indexable text contents available. Cannot re-index.");
+            } else {
+                logEntries.add("Indexing " + fileContents.size() + " files...");
+                indexingService.indexProject(mainProjectId, fileContents, embedModel, chunkSize, chunkOverlap);
+
+                IndexStatus status = indexStatusRepository.findByProjectId(mainProjectId).orElse(null);
+                if (status != null) {
+                    filesIndexedTotal = status.getIndexedFiles();
+                    chunksCreatedTotal = status.getTotalChunks();
+                    indexedNow = true;
+                    logEntries.add("Indexing complete: " + chunksCreatedTotal + " chunks created.");
+                }
+            }
+        }
+
+        // Perform vector similarity search
+        List<String> fileFilter = ("selected".equalsIgnoreCase(request.mode()) && request.files() != null)
+                ? request.files().stream().map(RagFileRef::path).toList()
+                : null;
+
+        List<VectorSearchService.SearchResult> searchResults = vectorSearchService.searchAcrossProjects(
+                request.projectIds(),
+                request.message(),
+                request.topK(),
+                embedModel,
+                fileFilter);
+
+        logEntries.add("Retrieved " + searchResults.size() + " relevant chunks.");
+
+        // Build context from search results
+        String ragContext = vectorSearchService.buildContextFromResults(searchResults);
+
+        // Build the final prompt with RAG context
+        String prompt = buildRagPrompt(request.message(), ragContext);
+
+        // Generate response using the LLM
+        String answer = ollamaService.generate(prompt, request.model());
+
+        return new RagChatResponse(
+                answer,
+                new RagChatResponse.RagMetadata(
+                        usedExisting ? "use_existing" : "reindex",
+                        usedExisting,
+                        indexedNow,
+                        searchResults.size(),
+                        chunksCreatedTotal,
+                        filesIndexedTotal,
+                        logEntries));
+    }
+
+    private List<RagFileRef> getAllProjectFiles(UUID projectId) {
+        List<RagFileRef> list = new ArrayList<>();
+        for (String path : workspaceStore.getAllPaths()) {
+            list.add(new RagFileRef("device", path, null));
+        }
+        return list;
+    }
+
+    private String buildRagPrompt(String userMessage, String ragContext) {
+        if (ragContext == null || ragContext.isBlank()) {
+            return """
+                    You are an AI coding assistant. The user is asking about a codebase, but no relevant context was found in the indexed files.
+
+                    USER REQUEST:
+                    %s
+
+                    Please respond by acknowledging that you don't have specific context about the code, and offer to help if they can provide more details or re-index the project.
+                    """
+                    .formatted(userMessage);
+        }
+
+        return """
+                You are an AI coding assistant. Answer the user's question based on the relevant code context retrieved from their indexed project files.
+
+                %s
+
+                USER REQUEST:
+                %s
+
+                Provide a helpful, specific answer based on the code context above. Reference specific files and code when relevant. If the context doesn't contain enough information to fully answer, acknowledge what you can determine and what additional information might be needed.
+                """
+                .formatted(ragContext, userMessage);
     }
 }

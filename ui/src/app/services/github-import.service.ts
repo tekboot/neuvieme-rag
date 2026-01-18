@@ -17,10 +17,10 @@ export type GithubFileResponse = {
 export class GithubImportService {
   private base = 'http://localhost:8081/api/github';
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
-  importRepo(payload: { owner: string; repo: string; branch?: string; subPath?: string }): Observable<FileNode[]> {
-    return this.http.post<FileNode[]>(`${this.base}/import`, payload, { withCredentials: true });
+  importRepo(payload: { owner: string; repo: string; branch?: string; subPath?: string }): Observable<{ project: any, tree: FileNode[] }> {
+    return this.http.post<{ project: any, tree: FileNode[] }>(`${this.base}/import`, payload, { withCredentials: true });
   }
 
   // ✅ NEW: fetch file content from backend

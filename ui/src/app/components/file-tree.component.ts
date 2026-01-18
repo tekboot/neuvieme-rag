@@ -57,7 +57,8 @@ import { FileNode } from '../models';
   styles: [`
     .tree { display:flex; flex-direction:column; gap: 2px; }
     .row { display:flex; align-items:center; gap: 6px; border-radius: 8px; }
-    .row.selected { background: rgba(255,255,255,0.06); }
+    /* Selected state: use accent background with theme-appropriate opacity */
+    .row.selected { background: var(--accent-bg); }
 
     .row-main{
       flex: 1;
@@ -67,27 +68,27 @@ import { FileNode } from '../models';
       padding: 6px 8px;
       border: none;
       background: transparent;
-      color: rgba(255,255,255,0.92);
+      color: var(--text-primary);
       cursor: pointer;
       text-align: left;
       border-radius: 8px;
     }
-    .row-main:hover { background: rgba(255,255,255,0.05); }
+    .row-main:hover { background: var(--bg-secondary); }
 
     .caret { width: 16px; opacity: 0.8; }
     .icon { width: 18px; opacity: 0.9; }
     .name { font-size: 13px; }
 
     .mini{
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.12);
-      color: rgba(255,255,255,0.92);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-light);
+      color: var(--text-primary);
       border-radius: 8px;
       padding: 4px 8px;
       cursor: pointer;
       font-size: 12px;
     }
-    .mini:hover { background: rgba(255,255,255,0.10); }
+    .mini:hover { background: var(--btn-hover); }
 
     .children { padding-left: 16px; }
 
@@ -96,7 +97,7 @@ import { FileNode } from '../models';
       height: 14px;
       margin: 0 0 0 8px;
       cursor: pointer;
-      accent-color: rgba(255,255,255,0.8);
+      accent-color: var(--accent);
     }
   `]
 })

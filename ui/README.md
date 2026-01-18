@@ -6,6 +6,15 @@ This project was generated with [Angular CLI](https://github.com/angular/angular
 
 Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
 
+## Prerequisites
+
+- **Java 17+**
+- **Node.js 18+**
+- **Ollama**: Must be installed and running locally.
+  - Required model for default embedding: `nomic-embed-text`
+  - Command: `ollama pull nomic-embed-text`
+- **PostgreSQL with pgvector**: Set up a local database named `deepcode`.
+
 ## Code scaffolding
 
 Run `ng generate component component-name` to generate a new component. You can also use `ng generate directive|pipe|service|class|guard|interface|enum|module`.

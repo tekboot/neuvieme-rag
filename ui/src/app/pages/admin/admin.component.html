@@ -1,0 +1,193 @@
+<div class="admin-page">
+  <header class="page-header">
+    <h1>Admin</h1>
+    <div class="header-actions">
+      <a routerLink="/super-admin" class="btn secondary">Super Admin →</a>
+      <div class="h-right">
+        <button class="theme-toggle" (click)="toggleTheme()" title="Toggle theme">
+          {{ theme() === 'dark' ? '☀️' : '🌙' }}
+        </button>
+        <a routerLink="/" class="btn secondary">← Back to Chat</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="admin-content">
+    <!-- Models Section -->
+    <section class="admin-section">
+      <h2>AI Models</h2>
+
+      <div class="section-actions">
+        <button class="btn secondary" (click)="loadModels()" [disabled]="modelsLoading()">
+          <span class="spinner" *ngIf="modelsLoading()"></span>
+          {{ modelsLoading() ? 'Refreshing...' : 'Refresh' }}
+        </button>
+      </div>
+
+      <div class="error" *ngIf="modelsError()">{{ modelsError() }}</div>
+
+      <table class="data-table" *ngIf="models().length > 0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Size</th>
+            <th>Family</th>
+            <th>Parameter Size</th>
+            <th>Quantization Level</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let model of models()">
+            <td>
+              <div class="model-name-cell">
+                {{ model.name }}
+                <span class="pill" *ngIf="activeModel() === model.name">Selected</span>
+              </div>
+            </td>
+            <td>{{ (model.size / 1024 / 1024 / 1024).toFixed(1) }} GB</td>
+            <td>{{ model.details.family }}</td>
+            <td>{{ model.details.parameter_size }}</td>
+            <td>{{ model.details.quantization_level }}</td>
+            <td>
+              <div class="row-actions">
+                <!-- If installed (simulated), show installed/selected state -->
+                <ng-container *ngIf="isInstalled(model.name); else installBtn">
+                  <button class="btn small primary" *ngIf="activeModel() !== model.name"
+                    (click)="setActiveModel(model.name)">
+                    Set as Selected
+                  </button>
+                  <button class="btn small secondary" disabled *ngIf="activeModel() === model.name">
+                    Active
+                  </button>
+                </ng-container>
+
+                <!-- Install Button -->
+                <ng-template #installBtn>
+                  <button class="btn small" [disabled]="isInstalling(model.name)" (click)="installModel(model.name)">
+                    <span class="spinner-small" *ngIf="isInstalling(model.name)"></span>
+                    {{ isInstalling(model.name) ? 'Installing...' : 'Pull / Install' }}
+                  </button>
+                </ng-template>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Projects & Indexing Section -->
+    <section class="admin-section">
+      <h2>Projects & Indexing</h2>
+      <p class="hint">
+        This section shows imported projects and their files.
+        Indexing enables semantic search (RAG) across your codebase.
+      </p>
+
+      <div class="projects-grid">
+        <!-- Projects List -->
+        <div class="projects-list">
+          <h3>Projects</h3>
+          <div class="project-cards">
+            <div class="project-card" *ngFor="let project of projects()"
+              [class.selected]="selectedProject()?.id === project.id" (click)="selectProject(project)">
+              <div class="project-icon">{{ project.source === 'github' ? '🐙' : '📁' }}</div>
+              <div class="project-info">
+                <div class="project-name">{{ project.name }}</div>
+                <div class="project-meta">
+                  {{ project.fileCount || 0 }} files •
+                  <span class="status-pill small" [class]="getStatusClass(project.indexingStatus)">
+                    {{ project.indexingStatus.replace('_', ' ') }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Project Detail -->
+        <div class="project-detail" *ngIf="selectedProject()">
+          <div class="detail-header">
+            <h3>{{ selectedProject()!.name }}</h3>
+            <button class="btn small" (click)="clearProjectSelection()">✕</button>
+          </div>
+
+          <div class="files-list">
+            <h4>Files ({{ selectedProject()!.files.length }})</h4>
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Path</th>
+                  <th>Size</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let file of selectedProject()!.files">
+                  <td class="path-cell">{{ file.path }}</td>
+                  <td>{{ file.size || '-' }}</td>
+                  <td>
+                    <span class="status-pill small" [class]="getStatusClass(file.status)">
+                      {{ file.status }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="indexing-options">
+            <h4>Indexing Options</h4>
+            <div class="option-grid">
+              <label class="option">
+                <span>Chunk Size</span>
+                <input type="number" class="text small" [(ngModel)]="indexingOptions().chunkSize" />
+              </label>
+              <label class="option">
+                <span>Overlap</span>
+                <input type="number" class="text small" [(ngModel)]="indexingOptions().overlap" />
+              </label>
+              <label class="option">
+                <span>Embed Model</span>
+                <select class="text" [(ngModel)]="indexingOptions().embedModel">
+                  <option *ngFor="let m of embedModels()" [value]="m">{{ m }}</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Indexing Status -->
+          <div class="indexing-status" *ngIf="indexingStatus() && selectedProject()?.id === indexingStatus()?.projectId">
+            <h4>Indexing Progress</h4>
+            <div class="progress-info">
+              <span class="status-pill" [class]="getStatusClass(indexingStatus()!.status)">
+                {{ indexingStatus()!.status.replace('_', ' ') }}
+              </span>
+              <span *ngIf="indexingStatus()!.status === 'in_progress'">
+                {{ indexingStatus()!.indexedFiles }} / {{ indexingStatus()!.totalFiles }} files
+                ({{ indexingStatus()!.totalChunks }} chunks)
+              </span>
+              <span *ngIf="indexingStatus()!.status === 'completed'">
+                {{ indexingStatus()!.totalFiles }} files indexed ({{ indexingStatus()!.totalChunks }} chunks)
+              </span>
+            </div>
+          </div>
+
+          <!-- Error display -->
+          <div class="error" *ngIf="indexingError()">{{ indexingError() }}</div>
+
+          <div class="detail-actions">
+            <button class="btn primary" (click)="prepareIndexing()"
+              [disabled]="selectedProject()!.indexingStatus === 'in_progress'">
+              {{ selectedProject()!.indexingStatus === 'in_progress' ? 'Indexing...' : 'Start Indexing' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="project-detail placeholder" *ngIf="!selectedProject()">
+          <p>Select a project to view files and configure indexing.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>

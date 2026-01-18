@@ -1,14 +1,21 @@
 import { Component, computed, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterOutlet, Router, RouterLink, NavigationEnd } from '@angular/router';
+import { filter } from 'rxjs/operators';
 import { FileNode, ChatMessage } from './models';
 import { FileTreeComponent } from './components/file-tree.component';
 import { GithubImportService } from './services/github-import.service';
 import { AiChatService, ContextMode, ContextFile } from './services/ai-chat.service';
 import { WorkspaceService } from './services/workspace.service';
+import { ModelsService, ModelInfo } from './services/models.service';
 import { HttpClientModule } from '@angular/common/http';
 import { AuthService } from './services/auth.service';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { ThemeService } from './services/theme.service';
+import { ProjectStore } from './services/project-store.service';
+import { IndexingService, IndexRequest } from './services/indexing.service';
+import { RagChatService } from './services/rag-chat.service';
 
 function uid(prefix = 'id') {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -19,11 +26,19 @@ type GithubCtx = { owner: string; repo: string; branch?: string; subPath?: strin
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, FileTreeComponent, HttpClientModule],
+  imports: [CommonModule, FormsModule, FileTreeComponent, HttpClientModule, RouterOutlet, RouterLink],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss']
 })
 export class AppComponent implements OnInit {
+  // ✅ Routing: check if we're on chat page or admin pages
+  isRootRoute = signal(true);
+
+  // ✅ Model selector
+  availableModels = signal<ModelInfo[]>([]);
+  selectedModel = signal<string>('qwen2.5-coder:7b');
+  modelDropdownOpen = signal(false);
+
   // ✅ workspace tree (multiple roots) - starts empty, "From device" created on first import
   fileTree = signal<FileNode[]>([]);
 
@@ -120,13 +135,16 @@ export class AppComponent implements OnInit {
   // ✅ One persistent device root
   private deviceRootId = 'device_root';
 
-  constructor(
-    private gh: GithubImportService,
-    private ai: AiChatService,
-    private auth: AuthService,
-    private workspace: WorkspaceService,
-    private sanitizer: DomSanitizer
-  ) {}
+  // ✅ RAG Signals
+  ragContextStrategy = signal<'use_existing' | 'reindex'>('use_existing');
+  ragLog = signal<string[]>([]);
+  ragStrategyLoading = signal(false);
+
+  // ✅ Ollama Fix Modal
+  ollamaFixModalOpen = signal(false);
+  ollamaErrorDetails = signal<any>(null);
+  noContentErrorDetails = signal<any>(null);
+
 
   ngOnInit(): void {
     // Clear return URL state after OAuth redirect
@@ -142,10 +160,52 @@ export class AppComponent implements OnInit {
       }
     });
 
+    // Load available models for chat dropdown
+    this.loadModels();
+
     if (localStorage.getItem('openGithubModalAfterLogin') === '1') {
       localStorage.removeItem('openGithubModalAfterLogin');
       this.openGithubModal();
     }
+  }
+
+  // ✅ Theme toggle
+  toggleTheme(): void {
+    this.themeService.toggle();
+  }
+
+  // Expose theme signal for template binding
+  theme = this.themeService.theme;
+
+  // ✅ Model selector
+  loadModels(): void {
+    this.modelsService.getActiveModels().subscribe({
+      next: (models) => {
+        this.availableModels.set(models);
+        // If current selection is not in list, select first available
+        if (models.length > 0 && !models.find(m => m.name === this.selectedModel())) {
+          this.selectedModel.set(models[0].name);
+        }
+      },
+      error: () => {
+        // Silently fail - models dropdown will just be empty
+        console.warn('[AppComponent] Failed to load models');
+      }
+    });
+  }
+
+  toggleModelDropdown(): void {
+    this.modelDropdownOpen.set(!this.modelDropdownOpen());
+  }
+
+  selectModel(modelName: string): void {
+    this.selectedModel.set(modelName);
+    this.modelDropdownOpen.set(false);
+  }
+
+  getModelDisplayName(name: string): string {
+    // Shorten model names for display
+    return name.split(':')[0];
   }
 
   toggleImportMenu() {
@@ -157,12 +217,16 @@ export class AppComponent implements OnInit {
   }
 
   openDeviceFilePicker(fileInput: HTMLInputElement) {
+    const DEBUG = true;
+    if (DEBUG) console.log('[DeviceImport] Picking files...');
     this.importMenuOpen.set(false);
     fileInput.value = '';
     fileInput.click();
   }
 
   openDeviceFolderPicker(folderInput: HTMLInputElement) {
+    const DEBUG = true;
+    if (DEBUG) console.log('[DeviceImport] Picking folder...');
     this.importMenuOpen.set(false);
     folderInput.value = '';
     folderInput.click();
@@ -230,15 +294,19 @@ export class AppComponent implements OnInit {
 
   // ---------- Device import (APPEND to From device root) ----------
   onDeviceFilesSelected(ev: Event) {
+    const DEBUG = true;
+    if (DEBUG) console.log('[DeviceImport] Files selected event triggered');
     const input = ev.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
+    if (DEBUG) console.log(`[DeviceImport] Selected ${files.length} files`);
     if (!files.length) return;
 
     // ✅ append to local map (keep previously imported ones too)
     const filesWithPath: { path: string; file: File }[] = [];
     for (const f of files) {
-      this.localFilesByPath.set(f.name, f);
-      filesWithPath.push({ path: f.name, file: f });
+      const p = ((f as any).webkitRelativePath || f.name) as string;
+      this.localFilesByPath.set(p, f);
+      filesWithPath.push({ path: p, file: f });
     }
 
     const newNodes = buildTreeFromFileList(files.map(f => ({ path: f.name, name: f.name })));
@@ -249,8 +317,11 @@ export class AppComponent implements OnInit {
   }
 
   onDeviceFolderSelected(ev: Event) {
+    const DEBUG = true;
+    if (DEBUG) console.log('[DeviceImport] Folder selected event triggered');
     const input = ev.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
+    if (DEBUG) console.log(`[DeviceImport] Selected ${files.length} files in folder`);
     if (!files.length) return;
 
     // ✅ append to local map (keep previously imported ones too)
@@ -314,9 +385,24 @@ export class AppComponent implements OnInit {
     deviceRoot.children = mergeNodeArrays(deviceRoot.children || [], newNodes);
 
     this.fileTree.set(roots);
+
+    // ✅ Track device project in ProjectStore (with file tree)
+    const fileCount = this.countFiles(deviceRoot.children || []);
+    this.projectStore.addOrUpdateProject({
+      id: this.deviceRootId,
+      source: 'device',
+      displayName: 'From device',
+      fileCount,
+      lastUpdated: Date.now()
+    }, deviceRoot.children || []);
   }
 
   // ---------- GitHub import (NEW ROOT per repo) ----------
+  retryGithubImport() {
+    this.ghError.set(null);
+    this.importFromGithub();
+  }
+
   importFromGithub() {
     this.ghError.set(null);
 
@@ -336,14 +422,53 @@ export class AppComponent implements OnInit {
     const subPath = (this.ghSubPath?.trim() || undefined);
 
     this.ghLoading.set(true);
+    this.ghError.set(null);
+
+    console.log('[GithubImport] Sending request:', { owner, repo, branch, subPath });
 
     this.gh.importRepo({ owner, repo, branch, subPath }).subscribe({
-      next: (tree) => {
+      next: (res) => {
+        console.log('[GithubImport] Response received:', res);
+
+        // Validate response structure
+        if (!res || typeof res !== 'object') {
+          console.error('[GithubImport] Invalid response: not an object', res);
+          this.ghError.set('Invalid response from server: expected object with project and tree');
+          this.ghLoading.set(false);
+          return;
+        }
+
+        // Check for error response (backend may return 200 with error body)
+        if ('code' in res && 'message' in res) {
+          console.error('[GithubImport] Server returned error:', res);
+          this.ghError.set((res as any).message || 'Import failed');
+          this.ghLoading.set(false);
+          return;
+        }
+
+        const { project, tree } = res;
+
+        if (!project || !project.id) {
+          console.error('[GithubImport] Invalid response: missing project.id', res);
+          this.ghError.set('Invalid response: missing project data');
+          this.ghLoading.set(false);
+          return;
+        }
+
+        if (!Array.isArray(tree)) {
+          console.error('[GithubImport] Invalid response: tree is not an array', res);
+          this.ghError.set('Invalid response: expected tree array');
+          this.ghLoading.set(false);
+          return;
+        }
+
+        console.log('[GithubImport] SUCCESS projectId=' + project.id + ' files=' + tree.length);
+
         const roots = [...this.fileTree()];
 
         // Root folder that carries repo meta for preview + refresh
         const ghRoot: FileNode = {
-          id: uid('ghroot'),
+          id: project.id, // Use persistence ID from backend
           name: `From GitHub (${repo})`,
           type: 'folder',
           path: `from-github/${owner}/${repo}`,
@@ -356,20 +481,55 @@ export class AppComponent implements OnInit {
         roots.push(ghRoot);
         this.fileTree.set(roots);
 
-        this.githubModalOpen.set(false);
+        // ✅ Track GitHub project in ProjectStore (with file tree)
+        const fileCount = this.countFiles(tree ?? []);
+        this.projectStore.addOrUpdateProject({
+          id: project.id,
+          source: 'github',
+          displayName: `${owner}/${repo}`,
+          owner,
+          repo,
+          branch,
+          subPath,
+          fileCount,
+          lastUpdated: Date.now()
+        }, tree ?? []);
 
-        // GitHub import does NOT clear localFilesByPath anymore (keep both sources)
-        // localFilesByPath is only used when the selected node.path matches a local key.
+        this.githubModalOpen.set(false);
+        this.ghLoading.set(false);
       },
       error: (err) => {
+        console.error('[GithubImport] HTTP Error:', err);
+
+        // Build detailed error message
+        let errorMsg = 'GitHub import failed';
+
         if (err?.status === 401) {
           this.githubConnected.set(false);
-          this.ghError.set('Not authenticated. Click "Connect GitHub" first.');
-        } else {
-          this.ghError.set(err?.error?.message || 'GitHub import failed. Check backend endpoint and auth.');
+          errorMsg = err?.error?.message || 'Not authenticated. Click "Connect GitHub" first.';
+        } else if (err?.status === 403) {
+          errorMsg = err?.error?.message || 'Access forbidden. Check repository permissions.';
+        } else if (err?.status === 404) {
+          errorMsg = err?.error?.message || 'Repository or branch not found.';
+        } else if (err?.status === 0) {
+          errorMsg = 'Network error: Cannot reach backend server at localhost:8081';
+        } else if (err?.error?.message) {
+          errorMsg = err.error.message;
+        } else if (err?.message) {
+          errorMsg = `Error: ${err.message}`;
+        } else if (err?.status) {
+          errorMsg = `HTTP ${err.status}: ${err.statusText || 'Unknown error'}`;
         }
-      },
-      complete: () => this.ghLoading.set(false)
+
+        // Add code if available
+        if (err?.error?.code) {
+          errorMsg = `[${err.error.code}] ${errorMsg}`;
+        }
+
+        console.error('[GithubImport] Final error message:', errorMsg);
+        this.ghError.set(errorMsg);
+        this.ghLoading.set(false);
+      }
     });
   }
 
@@ -379,9 +539,27 @@ export class AppComponent implements OnInit {
     if (!meta) return;
 
     const { owner, repo, branch, subPath } = meta;
+    console.log('[GithubRefresh] Refreshing:', { owner, repo, branch, subPath });
 
     this.gh.importRepo({ owner, repo, branch, subPath }).subscribe({
-      next: (tree) => {
+      next: (res) => {
+        console.log('[GithubRefresh] Response:', res);
+
+        // Check for error response
+        if ('code' in res && 'message' in res) {
+          console.error('[GithubRefresh] Server returned error:', res);
+          this.ghError.set((res as any).message || 'Refresh failed');
+          return;
+        }
+
+        const { project, tree } = res;
+
+        if (!project || !Array.isArray(tree)) {
+          console.error('[GithubRefresh] Invalid response structure');
+          this.ghError.set('Invalid response from server');
+          return;
+        }
+
         const roots = [...this.fileTree()];
         const idx = roots.findIndex(r => r.id === node.id);
         if (idx >= 0) {
@@ -391,13 +569,178 @@ export class AppComponent implements OnInit {
             children: tree ?? []
           };
           this.fileTree.set(roots);
+
+          // ✅ Update project in ProjectStore (with file tree)
+          const fileCount = this.countFiles(tree ?? []);
+          this.projectStore.addOrUpdateProject({
+            id: project.id,
+            source: 'github',
+            displayName: `${owner}/${repo}`,
+            owner,
+            repo,
+            branch,
+            subPath,
+            fileCount,
+            lastUpdated: Date.now()
+          }, tree ?? []);
+
+          console.log('[GithubRefresh] SUCCESS files=' + fileCount);
         }
       },
       error: (err) => {
-        const msg = err?.error?.message || 'Refresh failed. Are you authenticated?';
+        console.error('[GithubRefresh] Error:', err);
+        let msg = 'Refresh failed';
+        if (err?.error?.message) {
+          msg = err.error.message;
+        } else if (err?.status === 401) {
+          msg = 'Authentication expired. Please reconnect GitHub.';
+        } else if (err?.message) {
+          msg = err.message;
+        }
         this.ghError.set(msg);
       }
     });
+  }
+
+  // ---------- Indexing & RAG ----------
+  // View state: 'chat' | 'rag'
+  activeView = signal<'chat' | 'rag'>('chat');
+  indexingProjectId = signal<string | null>(null);
+  indexingStatus = signal<any>(null); // IndexStatusResponse
+
+  // Options
+  idxChunkSize = signal(1000);
+  idxOverlap = signal(200);
+  idxEmbedModel = signal('nomic-embed-text'); // default
+
+  // Chat Options
+  chatTopK = signal(5);
+  availableEmbedModels = ['nomic-embed-text', 'mxbai-embed-large', 'all-minilm'];
+
+  constructor(
+    private gh: GithubImportService,
+    private ai: AiChatService,
+    private auth: AuthService,
+    private workspace: WorkspaceService,
+    private sanitizer: DomSanitizer,
+    private modelsService: ModelsService,
+    private router: Router,
+    private themeService: ThemeService,
+    private projectStore: ProjectStore,
+    private indexingService: IndexingService,
+    private ragChat: RagChatService
+  ) {
+    // Track route changes to show/hide chat UI
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd)
+    ).subscribe(e => {
+      this.isRootRoute.set(e.urlAfterRedirects === '/' || e.urlAfterRedirects === '');
+    });
+  }
+
+  toggleRagView() {
+    this.activeView.set(this.activeView() === 'chat' ? 'rag' : 'chat');
+  }
+
+  startIndexing() {
+    // 1. Identify Target Project
+    // If files are selected, we index those.
+    // If no files selected, we try to index the whole "GitHub" project (fallback logic).
+
+    // Check if we have selected files (using the same computed list as Chat Context)
+    const selectedFiles = this.selectedContextFiles();
+    console.log('[StartIndexing] Selected files count:', selectedFiles.length);
+    let targetProjectId = this.indexingProjectId();
+
+    // If no project explicitly set, find from selection or default to first github
+    if (!targetProjectId) {
+      if (selectedFiles.length > 0) {
+        // Try to find the root project for the first selected file
+        const first = this.fileTree().find(root => selectedFiles[0].path.startsWith(root.path) || root.source === 'github');
+        // Logic above is weak. Let's use `findRootForNode` if we can map path back to node.
+        // Or simpler: just grab the first GitHub root if available, or Device root.
+        const ghRoot = this.fileTree().find(n => n.source === 'github');
+        if (ghRoot) targetProjectId = ghRoot.id;
+        else targetProjectId = this.deviceRootId;
+      } else {
+        // Fallback
+        const ghRoot = this.fileTree().find(n => n.source === 'github');
+        if (ghRoot) targetProjectId = ghRoot.id;
+      }
+    }
+
+    if (!targetProjectId) {
+      alert('No project found to index. Please import a project.');
+      return;
+    }
+    this.indexingProjectId.set(targetProjectId);
+
+    // 2. Build Payload
+    // If user has specific files selected, we use mode='selected' and send valid ContextFile objects
+    // If NO files selected, we might want to warn user, OR index everything (which is unsupported by backend for GitHub currently without file list).
+
+    if (selectedFiles.length === 0) {
+      alert('Please select at least one file to index (checkbox in Explorer). Full project indexing is not yet supported for GitHub.');
+      return;
+    }
+
+    // DTO says: String source is a field. We can default to 'github' or 'device'.
+    // Let's rely on file-level source    const request: IndexRequest = {
+    const request: IndexRequest = {
+      projectId: targetProjectId,
+      mode: 'selected',
+      files: selectedFiles.map(f => ({
+        source: f.source,
+        path: f.path,
+        github: f.github
+      })),
+      chunkSize: this.idxChunkSize(),
+      chunkOverlap: this.idxOverlap(),
+      embedModel: this.idxEmbedModel()
+    };
+
+    console.log('[StartIndexing] Payload:', JSON.stringify(request, null, 2));
+    if (request.files && request.files.length > 0) {
+      console.log('[StartIndexing] First file:', request.files[0]);
+    }
+
+    this.indexingService.indexProject(request).subscribe({
+      next: (_res: { message: string; projectId: string; fileCount?: number }) => {
+        this.pollIndexing(targetProjectId!);
+      },
+      error: (err) => {
+        console.error('[Indexing] Error:', err);
+        const apiError = err.error;
+
+        if (apiError?.code === 'OLLAMA_UNAVAILABLE' || err.status === 503) {
+          this.ollamaErrorDetails.set(apiError);
+          this.ollamaFixModalOpen.set(true);
+        } else if (apiError?.code === 'NO_INDEXABLE_CONTENT') {
+          this.noContentErrorDetails.set(apiError);
+          // We could show a specific modal or just use alert with details
+          const details = apiError.details ? Object.entries(apiError.details).map(([path, reason]) => `${path}: ${reason}`).join('\n') : '';
+          alert(`${apiError.message}\n\n${details}`);
+        } else {
+          alert('Indexing failed: ' + (apiError?.message || apiError?.error || err.message));
+        }
+      }
+    });
+  }
+
+  pollIndexing(projectId: string) {
+    this.indexingService.pollStatus(projectId).subscribe({
+      next: (status) => this.indexingStatus.set(status),
+      error: (err) => console.error(err)
+    });
+  }
+
+  // Helper to find root
+  findRootForNode(node: FileNode): FileNode | null {
+    const roots = this.fileTree();
+    for (const r of roots) {
+      if (r.id === node.id || containsNodeId(r, node.id)) return r;
+    }
+    return null;
   }
 
   // ---------- Delete selected ----------
@@ -408,6 +751,11 @@ export class AppComponent implements OnInit {
     // remove from tree
     const roots = removeNodeById([...this.fileTree()], selected.id);
     this.fileTree.set(roots);
+
+    // ✅ If deleting a GitHub root, remove from ProjectStore
+    if (selected.type === 'folder' && selected.source === 'github' && selected.githubMeta) {
+      this.projectStore.removeProject(selected.id);
+    }
 
     // remove local file mapping if it was a local file
     if (selected.type === 'file') {
@@ -482,10 +830,6 @@ export class AppComponent implements OnInit {
     };
     reader.onerror = () => this.openPreviewUnknown(path, 'Failed to read local file.');
     reader.readAsText(file);
-
-    if (!isText) {
-      // still ok: we try to read it as text
-    }
   }
 
   private joinSubPath(subPath: string | undefined, nodePath: string): string {
@@ -595,17 +939,12 @@ export class AppComponent implements OnInit {
     const roots = this.fileTree();
     for (const r of roots) {
       if (r.type === 'folder' && r.source === 'github' && r.githubMeta) {
-        // if selected path starts with this root's namespace, it's this repo
-        // root.path is "from-github/owner/repo"
-        // node.path is relative file path inside repo (your tree uses that)
-        // So instead of comparing by prefix, we just check if node exists under that root by id.
         if (containsNodeId(r, node.id)) return r.githubMeta as GithubCtx;
       }
     }
     return null;
   }
 
-  // ---------- Chat logic unchanged ----------
   handleKeydown(ev: KeyboardEvent) {
     if (ev.key === 'Enter' && !ev.shiftKey) {
       ev.preventDefault();
@@ -626,33 +965,63 @@ export class AppComponent implements OnInit {
 
     const mode = this.contextMode();
     const contextFiles = this.selectedContextFiles();
+    const model = this.selectedModel();
 
-    // Debug logging
-    console.log('[AppComponent] Context mode:', mode);
-    console.log('[AppComponent] Selected context files:', contextFiles);
+    // RAG Logic
+    const allProjects = this.projectStore.getProjects().map(p => p.id);
+    if (allProjects.length === 0) {
+      this.handleError({ error: { message: 'No projects found to query.' } });
+      this.sending.set(false);
+      return;
+    }
 
-    this.ai.chat({
+    this.ragLog.set(['Initializing RAG query...']);
+
+    this.ragChat.chat({
       message: text,
-      context: mode === 'all'
-        ? { mode: 'all' }
-        : { mode: 'selected', files: contextFiles }
+      projectIds: allProjects,
+      mode: mode,
+      strategy: this.ragContextStrategy(),
+      files: contextFiles.map(f => ({
+        source: f.source,
+        path: f.path,
+        github: f.github ? {
+          owner: f.github.owner,
+          repo: f.github.repo,
+          branch: f.github.branch,
+          subPath: f.github.subPath
+        } : undefined
+      })),
+      embedModel: this.idxEmbedModel(),
+      chunkSize: this.idxChunkSize(),
+      chunkOverlap: this.idxOverlap(),
+      topK: this.chatTopK(),
+      model: model
     }).subscribe({
-      next: (res) => {
-        const reply = res?.reply ?? '(no reply)';
-        const botMsg: ChatMessage = { id: uid('m'), role: 'assistant', content: reply, ts: Date.now() };
-        this.messages.set([...this.messages(), botMsg]);
-      },
-      error: (err) => {
-        const botMsg: ChatMessage = {
-          id: uid('m'),
-          role: 'assistant',
-          content: err?.error?.message || 'AI call failed. Check backend /api/ai/chat.',
-          ts: Date.now()
-        };
-        this.messages.set([...this.messages(), botMsg]);
-      },
+      next: (res) => this.handleReply(res),
+      error: (err) => this.handleError(err),
       complete: () => this.sending.set(false)
     });
+  }
+
+  handleReply(res: any) {
+    const reply = res?.answer || res?.reply || '(no reply)';
+    const botMsg: ChatMessage = { id: uid('m'), role: 'assistant', content: reply, ts: Date.now() };
+    this.messages.set([...this.messages(), botMsg]);
+
+    if (res?.rag?.messageLog) {
+      this.ragLog.set(res.rag.messageLog);
+    }
+  }
+
+  handleError(err: any) {
+    const botMsg: ChatMessage = {
+      id: uid('m'),
+      role: 'assistant',
+      content: err?.error?.message || 'AI call failed.',
+      ts: Date.now()
+    };
+    this.messages.set([...this.messages(), botMsg]);
   }
 
   clearChat() {
@@ -665,7 +1034,61 @@ export class AppComponent implements OnInit {
     const d = new Date(ts);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
+
+  // Helper: count files recursively in a tree
+  private countFiles(nodes: FileNode[]): number {
+    let count = 0;
+    for (const node of nodes) {
+      if (node.type === 'file') {
+        count++;
+      } else if (node.children) {
+        count += this.countFiles(node.children);
+      }
+    }
+    return count;
+  }
+
+  // ✅ Error handling helper
+  private handleApiError(err: any, fallbackTitle: string) {
+    let msg = fallbackTitle;
+    const apiError = err.error;
+
+    if (err.status === 0) {
+      msg = 'Network error: Cannot reach backend server at localhost:8081';
+    } else if (apiError?.message) {
+      msg = apiError.message;
+    } else if (err.message) {
+      msg = err.message;
+    }
+
+    if (apiError?.code) {
+      msg = `[${apiError.code}] ${msg}`;
+    }
+
+    if (err.status === 401) {
+      this.githubConnected.set(false);
+    }
+
+    if (fallbackTitle === 'GitHub import failed') {
+      this.ghError.set(msg);
+      this.ghLoading.set(false);
+    } else {
+      alert(msg);
+    }
+  }
+
+  closeOllamaFixModal() {
+    this.ollamaFixModalOpen.set(false);
+  }
+
+  retryIndexing() {
+    this.ollamaFixModalOpen.set(false);
+    this.startIndexing();
+  }
 }
+
+// Helper to check if node exists in tree
+
 
 // ---------- helpers ----------
 function buildTreeFromFileList(entries: { path: string; name: string }[]): FileNode[] {

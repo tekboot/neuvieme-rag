@@ -6,6 +6,10 @@ import com.ai.deepcode.dto.GithubImportRequest;
 import com.ai.deepcode.dto.UpdateFileRequest;
 import com.ai.deepcode.service.GithubTokenService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,44 +20,128 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/github")
 public class GithubController {
 
+    private static final Logger log = LoggerFactory.getLogger(GithubController.class);
+
     private final GithubTokenService tokenService;
     private final GithubApiClient github;
+    private final com.ai.deepcode.repository.ProjectRepository projectRepository;
 
-    public GithubController(GithubTokenService tokenService, GithubApiClient github) {
+    public GithubController(GithubTokenService tokenService, GithubApiClient github,
+            com.ai.deepcode.repository.ProjectRepository projectRepository) {
         this.tokenService = tokenService;
         this.github = github;
+        this.projectRepository = projectRepository;
     }
 
     @PostMapping("/import")
-    public List<FileNode> importRepo(Authentication auth, @RequestBody GithubImportRequest req) {
-        String token = tokenService.getAccessToken(auth);
+    public ResponseEntity<?> importRepo(Authentication auth, @RequestBody GithubImportRequest req) {
+        log.info("[GithubImport] START owner={} repo={} branch={} subPath={}",
+                req.owner(), req.repo(), req.branch(), req.subPath());
+
+        // Validate authentication
+        if (auth == null) {
+            log.error("[GithubImport] FAIL: No authentication provided");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("code", "GITHUB_AUTH_MISSING", "message", "GitHub authentication required. Please connect your GitHub account."));
+        }
+
+        String token;
+        try {
+            token = tokenService.getAccessToken(auth);
+            log.info("[GithubImport] Auth OK, token length={}", token != null ? token.length() : 0);
+        } catch (Exception e) {
+            log.error("[GithubImport] FAIL: Could not get access token: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("code", "GITHUB_TOKEN_ERROR", "message", "Failed to get GitHub token: " + e.getMessage()));
+        }
+
+        if (token == null || token.isBlank()) {
+            log.error("[GithubImport] FAIL: Token is null or blank");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("code", "GITHUB_TOKEN_MISSING", "message", "GitHub token is missing. Please reconnect your GitHub account."));
+        }
 
         String owner = req.owner();
         String repo = req.repo();
         String branch = (req.branch() == null || req.branch().isBlank()) ? "HEAD" : req.branch();
         String subPath = normalize(req.subPath());
 
-        Map<String, Object> treeResponse = github.getRepoTree(token, owner, repo, branch);
+        try {
+            // Persist Project
+            log.info("[GithubImport] Looking up or creating project for {}/{} branch={}", owner, repo, branch);
+            com.ai.deepcode.entity.Project project = projectRepository
+                    .findByGithubOwnerAndGithubRepoAndGithubBranch(owner, repo, branch)
+                    .orElseGet(() -> {
+                        log.info("[GithubImport] Creating new project record");
+                        com.ai.deepcode.entity.Project p = new com.ai.deepcode.entity.Project();
+                        p.setId(UUID.randomUUID());
+                        p.setName(repo);
+                        p.setDisplayName(owner + "/" + repo);
+                        p.setSource("github");
+                        p.setGithubOwner(owner);
+                        p.setGithubRepo(repo);
+                        p.setGithubBranch(branch);
+                        return projectRepository.save(p);
+                    });
 
-        List<Map<String, Object>> items = (List<Map<String, Object>>) treeResponse.getOrDefault("tree", List.of());
+            log.info("[GithubImport] Project ID={}, fetching repo tree from GitHub API", project.getId());
 
-        // Extract only blobs (files) and trees (folders)
-        List<String> paths = items.stream()
-                .map(m -> (String) m.get("path"))
-                .filter(Objects::nonNull)
-                .filter(p -> subPath == null || p.startsWith(subPath))
-                .collect(Collectors.toList());
+            Map<String, Object> treeResponse = github.getRepoTree(token, owner, repo, branch);
 
-        // If subPath exists, remove its prefix so tree starts from that folder
-        if (subPath != null) {
-            paths = paths.stream()
-                    .map(p -> p.substring(subPath.length()))
-                    .map(p -> p.startsWith("/") ? p.substring(1) : p)
-                    .filter(p -> !p.isBlank())
-                    .toList();
+            if (treeResponse == null) {
+                log.error("[GithubImport] FAIL: GitHub API returned null tree response");
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("code", "GITHUB_API_ERROR", "message", "GitHub API returned empty response"));
+            }
+
+            List<Map<String, Object>> items = (List<Map<String, Object>>) treeResponse.getOrDefault("tree", List.of());
+            log.info("[GithubImport] GitHub API returned {} tree items", items.size());
+
+            // Extract only blobs (files) and trees (folders)
+            List<String> paths = items.stream()
+                    .map(m -> (String) m.get("path"))
+                    .filter(Objects::nonNull)
+                    .filter(p -> subPath == null || p.startsWith(subPath))
+                    .collect(Collectors.toList());
+
+            // If subPath exists, remove its prefix so tree starts from that folder
+            if (subPath != null) {
+                paths = paths.stream()
+                        .map(p -> p.substring(subPath.length()))
+                        .map(p -> p.startsWith("/") ? p.substring(1) : p)
+                        .filter(p -> !p.isBlank())
+                        .toList();
+            }
+
+            log.info("[GithubImport] Building file tree from {} paths", paths.size());
+
+            // Update file count
+            List<FileNode> tree = buildTree(paths);
+            project.setFileCount(paths.size());
+            projectRepository.save(project);
+
+            log.info("[GithubImport] SUCCESS projectId={} files={} treeRoots={}",
+                    project.getId(), paths.size(), tree.size());
+
+            return ResponseEntity.ok(com.ai.deepcode.dto.GithubImportResponse.from(project, tree));
+
+        } catch (org.springframework.web.client.HttpClientErrorException.Unauthorized e) {
+            log.error("[GithubImport] FAIL: GitHub API returned 401 Unauthorized");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("code", "GITHUB_UNAUTHORIZED", "message", "GitHub token expired or invalid. Please reconnect your GitHub account."));
+        } catch (org.springframework.web.client.HttpClientErrorException.Forbidden e) {
+            log.error("[GithubImport] FAIL: GitHub API returned 403 Forbidden");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("code", "GITHUB_FORBIDDEN", "message", "Access denied to repository. Check repository permissions."));
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            log.error("[GithubImport] FAIL: GitHub API returned 404 Not Found");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("code", "GITHUB_NOT_FOUND", "message", "Repository or branch not found: " + owner + "/" + repo + " branch=" + branch));
+        } catch (Exception e) {
+            log.error("[GithubImport] FAIL: Unexpected error: {} - {}", e.getClass().getSimpleName(), e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("code", "GITHUB_IMPORT_FAILED", "message", "Import failed: " + e.getMessage(), "details", e.getClass().getSimpleName()));
         }
-
-        return buildTree(paths);
     }
 
     // Existing endpoints unchanged
@@ -69,8 +157,7 @@ public class GithubController {
             @RequestParam String owner,
             @RequestParam String repo,
             @RequestParam String path,
-            @RequestParam(required = false) String ref
-    ) {
+            @RequestParam(required = false) String ref) {
         String token = tokenService.getAccessToken(auth);
         return github.getFile(token, owner, repo, path, ref);
     }
@@ -90,16 +177,18 @@ public class GithubController {
                 req.branch(),
                 req.commitMessage(),
                 req.newContentUtf8(),
-                sha
-        );
+                sha);
     }
 
     // ---- helpers ----
     private static String normalize(String p) {
-        if (p == null) return null;
+        if (p == null)
+            return null;
         String x = p.trim().replace("\\", "/");
-        while (x.startsWith("/")) x = x.substring(1);
-        while (x.endsWith("/")) x = x.substring(0, x.length() - 1);
+        while (x.startsWith("/"))
+            x = x.substring(1);
+        while (x.endsWith("/"))
+            x = x.substring(0, x.length() - 1);
         return x.isBlank() ? null : x;
     }
 
@@ -124,7 +213,8 @@ public class GithubController {
                 }
                 current = next;
 
-                if (!isLast) current.type = "folder";
+                if (!isLast)
+                    current.type = "folder";
             }
         }
 
@@ -150,8 +240,7 @@ public class GithubController {
                     n.type,
                     n.path,
                     n.type.equals("folder") ? n.toFileNodes() : null,
-                    false
-            )).toList();
+                    false)).toList();
         }
     }
 }

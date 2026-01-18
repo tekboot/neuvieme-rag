@@ -1,0 +1,152 @@
+<div class="admin-page">
+  <header class="page-header">
+    <h1>Super Admin</h1>
+    <div class="h-right">
+      <button class="theme-toggle" (click)="toggleTheme()" title="Toggle theme">
+        {{ theme() === 'dark' ? '☀️' : '🌙' }}
+      </button>
+      <a routerLink="/" class="btn secondary">← Back to Chat</a>
+    </div>
+  </header>
+
+  <div class="admin-content">
+    <!-- Users Section -->
+    <section class="admin-section">
+      <h2>User Management</h2>
+      <p class="hint">User management is a placeholder. Backend CRUD not yet implemented.</p>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let user of users()">
+            <td>{{ user.id }}</td>
+            <td>{{ user.name }}</td>
+            <td>{{ user.email }}</td>
+            <td><span class="role-badge" [class]="'role-' + user.role">{{ user.role }}</span></td>
+            <td>
+              <button class="btn small" (click)="openEditModal(user)">Edit</button>
+              <button class="btn small danger" (click)="openDeleteModal(user)">Delete</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Models Section -->
+    <section class="admin-section">
+      <h2>AI Models (Ollama)</h2>
+
+      <div class="section-actions">
+        <button class="btn secondary" (click)="loadModels()" [disabled]="loading()">
+          <span class="spinner" *ngIf="loading()"></span>
+          {{ loading() ? 'Loading...' : 'Refresh' }}
+        </button>
+      </div>
+
+      <div class="error" *ngIf="error()">{{ error() }}</div>
+
+      <!-- Pull Model Form -->
+      <div class="pull-form">
+        <input type="text" class="text" [(ngModel)]="pullModelName"
+          placeholder="Model name (e.g., llama3.2, codellama:7b)" [disabled]="pulling()" />
+        <button class="btn primary" (click)="pullModel()" [disabled]="pulling() || !pullModelName.trim()">
+          <span class="spinner" *ngIf="pulling()"></span>
+          {{ pulling() ? 'Pulling...' : 'Pull / Install' }}
+        </button>
+      </div>
+      <div class="error" *ngIf="pullError()">{{ pullError() }}</div>
+      <div class="success" *ngIf="pullSuccess()">{{ pullSuccess() }}</div>
+
+      <!-- Models Table -->
+      <table class="data-table" *ngIf="models().length > 0">
+        <thead>
+          <tr>
+            <th>Model Name</th>
+            <th>Size</th>
+            <th>Modified</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let model of models()">
+            <td>{{ model.name }}</td>
+            <td>{{ (model.size / 1024 / 1024 / 1024).toFixed(1) }} GB</td>
+            <td>{{ model.modified_at || '-' }}</td>
+            <td>
+              <span class="status-pill" *ngIf="activeModel() === model.name" [class]="getStatusClass('selected')">
+                Selected
+              </span>
+              <button class="btn small" *ngIf="activeModel() !== model.name" (click)="setActiveModel(model.name)">Set as
+                Selected</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="hint" *ngIf="models().length === 0 && !loading()">
+        No models found. Make sure Ollama is running and has models installed.
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- Edit User Modal -->
+<div class="backdrop" *ngIf="editModalOpen()" (click)="closeEditModal()"></div>
+<div class="modal" *ngIf="editModalOpen()">
+  <div class="modal-header">
+    <div class="modal-title">Edit User</div>
+    <button class="icon-btn" (click)="closeEditModal()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="field">
+      <label>Name</label>
+      <input type="text" class="text" [ngModel]="editForm().name"
+        (ngModelChange)="editForm.set({name: $event, email: editForm().email, role: editForm().role})"
+        placeholder="Full Name">
+    </div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" class="text" [ngModel]="editForm().email"
+        (ngModelChange)="editForm.set({name: editForm().name, email: $event, role: editForm().role})"
+        placeholder="Email Address">
+    </div>
+    <div class="field">
+      <label>Role</label>
+      <select class="text" [ngModel]="editForm().role"
+        (ngModelChange)="editForm.set({name: editForm().name, email: editForm().email, role: $event})">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+        <option value="super-admin">Super Admin</option>
+      </select>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn secondary" (click)="closeEditModal()">Cancel</button>
+    <button class="btn primary" (click)="saveUser()">Save Changes</button>
+  </div>
+</div>
+
+<!-- Delete User Modal -->
+<div class="backdrop" *ngIf="deleteModalOpen()" (click)="closeDeleteModal()"></div>
+<div class="modal" *ngIf="deleteModalOpen()">
+  <div class="modal-header">
+    <div class="modal-title">Delete User</div>
+    <button class="icon-btn" (click)="closeDeleteModal()">✕</button>
+  </div>
+  <div class="modal-body">
+    <p>Are you sure you want to delete <strong>{{ selectedUser()?.name }}</strong>?</p>
+    <p class="hint">This action cannot be undone.</p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn secondary" (click)="closeDeleteModal()">Cancel</button>
+    <button class="btn danger" (click)="deleteUser()">Delete User</button>
+  </div>
+</div>

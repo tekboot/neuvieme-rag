@@ -1,9 +1,16 @@
-<div class="app">
+<!-- Router outlet for admin pages -->
+<router-outlet></router-outlet>
+
+<!-- Main chat app (only shown on root route) -->
+<div class="app" *ngIf="isRootRoute()">
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="title">EXPLORER</div>
-      <button class="btn" (click)="toggleImportMenu()">Import ▾</button>
+      <div class="row">
+        <button class="btn small" (click)="toggleRagView()" title="Index Settings">⚡</button>
+        <button class="btn" (click)="toggleImportMenu()">Import ▾</button>
+      </div>
     </div>
 
     <div class="import-menu" *ngIf="importMenuOpen()">
@@ -23,14 +30,9 @@
     <div class="divider"></div>
 
     <div class="tree-wrap">
-      <app-file-tree
-        [nodes]="fileTree()"
-        [selectedPath]="selectedFilePath()"
-        [selectionEnabled]="contextMode() === 'selected'"
-        (selectFile)="onSelectFile($event)"
-        (toggleSelect)="toggleFileSelection($event)"
-        (refreshGithub)="refreshGithubFolder($event)"
-      />
+      <app-file-tree [nodes]="fileTree()" [selectedPath]="selectedFilePath()"
+        [selectionEnabled]="contextMode() === 'selected' || activeView() === 'rag'" (selectFile)="onSelectFile($event)"
+        (toggleSelect)="toggleFileSelection($event)" (refreshGithub)="refreshGithubFolder($event)" />
     </div>
 
     <div class="selected-footer" *ngIf="selectedFile()">
@@ -49,131 +51,243 @@
     </div>
   </aside>
 
-  <!-- Main Chat -->
+  <!-- Main Area: Chat or RAG -->
   <main class="main">
-    <header class="main-header">
-      <div class="h-title">AI Chat</div>
-      <div class="h-sub">
-        <span class="context-label">Context:</span>
-        <button
-          class="mode-btn"
-          [class.active]="contextMode() === 'all'"
-          (click)="contextMode.set('all')"
-        >All files</button>
-        <button
-          class="mode-btn"
-          [class.active]="contextMode() === 'selected'"
-          (click)="contextMode.set('selected')"
-        >Selected files</button>
-        <span class="pill" *ngIf="contextMode() === 'selected'">{{ selectedFilePaths().length }} selected</span>
-      </div>
-    </header>
 
-    <section class="chat">
-      <div class="messages" #msgBox>
-        <div class="msg" *ngFor="let m of messages()" [class.user]="m.role === 'user'"
-          [class.assistant]="m.role === 'assistant'">
-          <div class="meta">
-            <span class="role">{{ m.role }}</span>
-            <span class="dot">•</span>
-            <span class="time">{{ formatTime(m.ts) }}</span>
+    <!-- CHAT VIEW -->
+    <ng-container *ngIf="activeView() === 'chat'">
+      <header class="main-header">
+        <div class="h-left">
+          <div class="h-title">AI Chat</div>
+          <div class="h-sub">
+            <span class="context-label">Context:</span>
+            <button class="mode-btn" [class.active]="contextMode() === 'all'" (click)="contextMode.set('all')">All
+              files</button>
+            <button class="mode-btn" [class.active]="contextMode() === 'selected'"
+              (click)="contextMode.set('selected')">Selected files</button>
+            <span class="pill" *ngIf="contextMode() === 'selected'">{{ selectedFilePaths().length }} selected</span>
           </div>
-          <div class="bubble">{{ m.content }}</div>
         </div>
 
-        <div class="typing" *ngIf="sending()">
-          <div class="meta">
-            <span class="role">assistant</span><span class="dot">•</span><span class="time">typing…</span>
+        <div class="h-right">
+          <div class="model-selector" *ngIf="availableModels().length > 0">
+            <button class="model-btn" (click)="toggleModelDropdown()">
+              <span class="model-label">Model:</span>
+              <span class="model-name">{{ getModelDisplayName(selectedModel()) }}</span>
+              <span class="arrow">▾</span>
+            </button>
+            <div class="model-dropdown" *ngIf="modelDropdownOpen()">
+              <button class="model-option" *ngFor="let model of availableModels()"
+                [class.active]="model.name === selectedModel()" (click)="selectModel(model.name)">
+                {{ model.name }}
+              </button>
+            </div>
           </div>
-          <div class="bubble">…</div>
+          <button class="theme-toggle" (click)="toggleTheme()" title="Toggle theme">{{ theme() === 'dark' ? '☀️' : '🌙'
+            }}</button>
+          <a routerLink="/admin" class="admin-link">Admin</a>
+        </div>
+      </header>
+
+      <section class="chat">
+        <div class="messages" #msgBox>
+          <div class="msg" *ngFor="let m of messages()" [class.user]="m.role === 'user'"
+            [class.assistant]="m.role === 'assistant'">
+            <div class="meta">
+              <span class="role">{{ m.role }}</span>
+              <span class="dot">•</span>
+              <span class="time">{{ formatTime(m.ts) }}</span>
+            </div>
+            <div class="bubble">{{ m.content }}</div>
+          </div>
+          <div class="typing" *ngIf="sending()">
+            <div class="meta"><span class="role">assistant</span><span class="dot">•</span><span
+                class="time">typing…</span></div>
+            <div class="bubble">…</div>
+          </div>
+        </div>
+
+        <form class="composer" (submit)="send($event)">
+          <textarea [(ngModel)]="draft" name="draft" class="input" placeholder="Ask the AI… (Shift+Enter for newline)"
+            (keydown)="handleKeydown($event)"></textarea>
+          <div class="composer-actions">
+            <button type="button" class="btn ghost" (click)="clearChat()">Clear</button>
+            <button type="submit" class="btn primary" [disabled]="sending() || !draft.trim()">Send</button>
+          </div>
+        </form>
+      </section>
+    </ng-container>
+
+    <!-- RAG / INDEXING VIEW -->
+    <ng-container *ngIf="activeView() === 'rag'">
+      <div class="rag-panel">
+        <header class="rag-header">
+          <div class="rh-title">RAG / Indexing Station</div>
+          <button class="btn secondary small" (click)="toggleRagView()">Back to Chat</button>
+        </header>
+
+        <div class="rag-content">
+          <div class="rag-section">
+            <h3>Selected Files ({{ selectedFilePaths().length }})</h3>
+            <div class="file-list-preview" *ngIf="selectedFilePaths().length > 0; else noFiles">
+              <div *ngFor="let path of selectedFilePaths()" class="file-tag">
+                {{ path }}
+                <!-- Option to remove file interaction could go here -->
+              </div>
+            </div>
+            <ng-template #noFiles>
+              <div class="hint">No files selected. Check files in the explorer to add them.</div>
+            </ng-template>
+          </div>
+
+          <div class="rag-cols">
+            <div class="rag-col">
+              <h3>Indexing Options</h3>
+              <div class="field-row">
+                <label>Chunk Size</label>
+                <input type="number" [ngModel]="idxChunkSize()" (ngModelChange)="idxChunkSize.set($event)" />
+              </div>
+              <div class="field-row">
+                <label>Overlap</label>
+                <input type="number" [ngModel]="idxOverlap()" (ngModelChange)="idxOverlap.set($event)" />
+              </div>
+              <div class="field-row">
+                <label>Embedding Model</label>
+                <select [ngModel]="idxEmbedModel()" (ngModelChange)="idxEmbedModel.set($event)">
+                  <option *ngFor="let m of availableEmbedModels" [value]="m">{{ m }}</option>
+                </select>
+              </div>
+              <button class="btn primary full" (click)="startIndexing()">
+                Index Selected Files
+              </button>
+
+              <div class="status-box" *ngIf="indexingStatus() as status">
+                <div class="st-row">Status: <strong>{{ status.status }}</strong></div>
+                <div class="st-row">Files: {{ status.indexedFiles }} / {{ status.totalFiles }}</div>
+                <div class="st-row" *ngIf="status.errorMessage" class="error">{{ status.errorMessage }}</div>
+              </div>
+            </div>
+
+            <div class="rag-col">
+              <h3>Ask with RAG</h3>
+              <div class="field-row">
+                <label>Context Strategy</label>
+                <select [ngModel]="ragContextStrategy()" (ngModelChange)="ragContextStrategy.set($event)">
+                  <option value="use_existing">Use current indexing</option>
+                  <option value="reindex">Re-index Selected (On-the-fly)</option>
+                </select>
+              </div>
+
+              <textarea [(ngModel)]="draft" class="input rag-input"
+                placeholder="Ask a question about selected files..."></textarea>
+
+              <button class="btn primary full" (click)="send($event)" [disabled]="sending() || !draft.trim()">
+                {{ sending() ? 'Processing...' : 'Ask' }}
+              </button>
+
+              <div class="rag-log" *ngIf="ragLog().length > 0">
+                <div class="log-header">RAG Execution Log</div>
+                <div class="log-content">
+                  <div *ngFor="let entry of ragLog()" class="log-item">
+                    <span class="dot"></span> {{ entry }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+    </ng-container>
 
-      <form class="composer" (submit)="send($event)">
-        <textarea [(ngModel)]="draft" name="draft" class="input" placeholder="Ask the AI… (Shift+Enter for newline)"
-          (keydown)="handleKeydown($event)"></textarea>
-
-        <div class="composer-actions">
-          <button type="button" class="btn ghost" (click)="clearChat()">Clear</button>
-          <button type="submit" class="btn primary" [disabled]="sending() || !draft.trim()">Send</button>
-        </div>
-      </form>
-    </section>
   </main>
 
-  <!-- GitHub Modal -->
+  <!-- GitHub Modal (unchanged) -->
   <div class="backdrop" *ngIf="githubModalOpen()" (click)="closeGithubModal()"></div>
   <div class="modal" *ngIf="githubModalOpen()">
+    <!-- ... existing modal content ... -->
     <div class="modal-header">
       <div class="modal-title">Import from GitHub</div>
       <button class="icon-btn" (click)="closeGithubModal()">✕</button>
     </div>
-
     <div class="modal-body">
       <label class="field">
         <span>Owner</span>
         <input class="text" [(ngModel)]="ghOwner" name="ghOwner" placeholder="e.g. octocat" />
       </label>
-
       <label class="field">
         <span>Repo</span>
         <input class="text" [(ngModel)]="ghRepo" name="ghRepo" placeholder="e.g. hello-world" />
       </label>
-
       <label class="field">
         <span>Branch (optional)</span>
         <input class="text" [(ngModel)]="ghBranch" name="ghBranch" placeholder="main" />
       </label>
-
       <label class="field">
         <span>Sub-path (optional)</span>
         <input class="text" [(ngModel)]="ghSubPath" name="ghSubPath" placeholder="src/app" />
       </label>
-
       <div class="hint">
         This UI expects your backend endpoint <code>/api/github/import</code> to return a <code>FileNode[]</code> tree.
       </div>
-
-      <div class="error" *ngIf="ghError()">{{ ghError() }}</div>
+      <div class="error" *ngIf="ghError()">
+        <span>{{ ghError() }}</span>
+        <button class="btn-link" (click)="retryGithubImport()" *ngIf="!ghLoading()">Retry</button>
+      </div>
     </div>
-
     <div class="modal-footer">
       <button class="btn secondary" (click)="closeGithubModal()">Cancel</button>
-
       <button class="btn secondary" *ngIf="!githubConnected()" (click)="connectGithub()" [disabled]="checkingGithub()">
         {{ checkingGithub() ? 'Checking…' : 'Connect GitHub' }}
       </button>
-
       <button class="btn primary" *ngIf="githubConnected()" [disabled]="ghLoading()" (click)="importFromGithub()">
         {{ ghLoading() ? 'Importing…' : 'Import' }}
       </button>
     </div>
   </div>
 
-  <!-- Preview Modal -->
-  <div class="backdrop" *ngIf="previewOpen()" (click)="closePreview()"></div>
-  <div class="modal preview" *ngIf="previewOpen()">
+  <!-- Ollama Fix Modal -->
+  <div class="backdrop" *ngIf="ollamaFixModalOpen()" (click)="closeOllamaFixModal()"></div>
+  <div class="modal" *ngIf="ollamaFixModalOpen()">
     <div class="modal-header">
-      <div class="modal-title">Preview: {{ previewTitle() }}</div>
-      <button class="icon-btn" (click)="closePreview()">✕</button>
+      <div class="modal-title">Ollama Unavailable</div>
+      <button class="icon-btn" (click)="closeOllamaFixModal()">✕</button>
     </div>
+    <div class="modal-body">
+      <div class="error-banner">
+        <span class="icon">⚠️</span>
+        <div class="msg">
+          <strong>Indexing failed:</strong> {{ ollamaErrorDetails()?.message || 'Local Ollama service is not reachable.'
+          }}
+        </div>
+      </div>
 
-    <div class="modal-body preview-body">
-      <div class="error" *ngIf="previewError()">{{ previewError() }}</div>
-
-      <ng-container [ngSwitch]="previewKind()">
-        <pre class="preview-text" *ngSwitchCase="'text'">{{ previewText() }}</pre>
-
-        <iframe *ngSwitchCase="'pdf'" class="preview-frame" [src]="previewUrl()" title="PDF preview"></iframe>
-
-        <img *ngSwitchCase="'image'" class="preview-image" [src]="previewUrl()" alt="image preview" />
-
-        <div *ngSwitchDefault class="hint">Preview not available.</div>
-      </ng-container>
+      <div class="how-to-fix">
+        <h4>How to fix:</h4>
+        <div class="steps">
+          <div class="step">
+            <span class="step-num">1</span>
+            <div class="step-text">Open CMD or Terminal as administrator</div>
+          </div>
+          <div class="step">
+            <span class="step-num">2</span>
+            <div class="step-text">Run <code>net stop Ollama</code> followed by <code>net start Ollama</code></div>
+          </div>
+          <div class="step">
+            <span class="step-num">3</span>
+            <div class="step-text">Alternatively: <code>taskkill /IM ollama.exe /F</code> and then
+              <code>ollama serve</code>
+            </div>
+          </div>
+          <div class="step">
+            <span class="step-num">4</span>
+            <div class="step-text">Click <strong>Retry</strong> below once Ollama is running</div>
+          </div>
+        </div>
+      </div>
     </div>
-
     <div class="modal-footer">
-      <button class="btn secondary" (click)="closePreview()">Close</button>
+      <button class="btn secondary" (click)="closeOllamaFixModal()">Cancel</button>
+      <button class="btn primary" (click)="retryIndexing()">Retry Indexing</button>
     </div>
   </div>
 </div>
