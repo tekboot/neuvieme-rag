@@ -43,7 +43,7 @@ export interface IndexStatusResponse {
 
 @Injectable({ providedIn: 'root' })
 export class IndexingService {
-  private readonly baseUrl = 'http://localhost:8081/api/index';
+  private readonly baseUrl = '/api/index';
 
   constructor(private http: HttpClient) { }
 

@@ -10,7 +10,7 @@ export interface AuthState {
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private base = 'http://localhost:8081';
+  private base = '';
 
   // Reactive auth state
   authState = signal<AuthState>({

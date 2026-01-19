@@ -8,7 +8,7 @@ export interface UploadResult {
 
 @Injectable({ providedIn: 'root' })
 export class WorkspaceService {
-  private base = 'http://localhost:8081/api/workspace';
+  private base = '/api/workspace';
 
   constructor(private http: HttpClient) {}
 

@@ -12,7 +12,7 @@ export interface AskResponse {
 
 @Injectable({ providedIn: 'root' })
 export class AiService {
-  private baseUrl = 'http://localhost:8081/api/ai';
+  private baseUrl = '/api/ai';
 
   constructor(private http: HttpClient) {}
 

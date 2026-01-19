@@ -33,6 +33,31 @@ public class GithubController {
         this.projectRepository = projectRepository;
     }
 
+    @GetMapping("/status")
+    public ResponseEntity<?> status(Authentication auth) {
+        if (auth == null) {
+            return ResponseEntity.ok(Map.of(
+                    "authorized", false,
+                    "message", "Not authenticated with GitHub"
+            ));
+        }
+
+        try {
+            String token = tokenService.getAccessToken(auth);
+            boolean ok = (token != null && !token.isBlank());
+            return ResponseEntity.ok(Map.of(
+                    "authorized", ok,
+                    "message", ok ? "GitHub token available" : "GitHub token missing"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of(
+                    "authorized", false,
+                    "message", "GitHub token retrieval failed: " + e.getMessage()
+            ));
+        }
+    }
+
+
     @PostMapping("/import")
     public ResponseEntity<?> importRepo(Authentication auth, @RequestBody GithubImportRequest req) {
         log.info("[GithubImport] START owner={} repo={} branch={} subPath={}",

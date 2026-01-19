@@ -18,7 +18,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/ollama")
-@CrossOrigin(origins = "http://localhost:4200", allowCredentials = "true")
 public class OllamaController {
 
     private static final Logger log = LoggerFactory.getLogger(OllamaController.class);

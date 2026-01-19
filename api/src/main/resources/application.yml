@@ -1,15 +1,19 @@
 server:
-  port: 8081
+  port: ${SERVER_PORT:8081}
+  forward-headers-strategy: framework
+
+app:
+  ui-base-url: ${APP_UI_BASE_URL:http://89.116.229.90}
 
 ollama:
-  base-url: http://localhost:11434
-  model: qwen2.5-coder:7b
+  base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+  model: ${OLLAMA_MODEL:qwen2.5-coder:1.5b}
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/deepcode
-    username: postgres
-    password:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/deepcode}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -27,8 +31,8 @@ spring:
       client:
         registration:
           github:
-            client-id: ${GITHUB_CLIENT_ID}
-            client-secret: ${GITHUB_CLIENT_SECRET}
+            client-id: Ov23li0wCC1ULAfj7kor
+            client-secret: b9810418b3723e76b99376eb21112f9ab8bcea85
             scope: repo,read:user
         provider:
           github:

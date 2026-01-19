@@ -15,7 +15,7 @@ export type GithubFileResponse = {
 
 @Injectable({ providedIn: 'root' })
 export class GithubImportService {
-  private base = 'http://localhost:8081/api/github';
+  private base = '/api/github';
 
   constructor(private http: HttpClient) { }
 

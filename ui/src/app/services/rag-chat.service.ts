@@ -30,7 +30,7 @@ export interface RagChatResponse {
 
 @Injectable({ providedIn: 'root' })
 export class RagChatService {
-  private readonly baseUrl = 'http://localhost:8081/api/ai';
+  private readonly baseUrl = '/api/ai';
 
   constructor(private http: HttpClient) { }
 

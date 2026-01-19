@@ -3,7 +3,6 @@ package com.ai.deepcode.controller;
 import com.ai.deepcode.service.GithubTokenService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,10 +12,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/auth")
-@CrossOrigin(
-        origins = "http://localhost:4200",
-        allowCredentials = "true"
-)
 public class AuthController {
 
     private final GithubTokenService githubTokenService;

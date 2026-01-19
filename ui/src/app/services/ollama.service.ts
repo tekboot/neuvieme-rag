@@ -57,7 +57,7 @@ const STATIC_MODELS: OllamaModel[] = [
 
 @Injectable({ providedIn: 'root' })
 export class OllamaService {
-  private base = 'http://localhost:8081/api/ollama';
+  private base = '/api/ollama';
   private useStaticFallback = false;
 
   constructor(private http: HttpClient) { }

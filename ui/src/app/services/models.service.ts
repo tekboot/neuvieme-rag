@@ -18,7 +18,7 @@ export interface PullResult {
 
 @Injectable({ providedIn: 'root' })
 export class ModelsService {
-  private base = 'http://localhost:8081/api/admin';
+  private base = '/api/admin';
 
   constructor(private http: HttpClient) {}
 

@@ -39,7 +39,7 @@ export interface RagChatPayload {
 
 @Injectable({ providedIn: 'root' })
 export class AiChatService {
-  private base = 'http://localhost:8081/api/ai'; // change in env
+  private base = '/api/ai'; // change in env
 
   constructor(private http: HttpClient) { }
 
