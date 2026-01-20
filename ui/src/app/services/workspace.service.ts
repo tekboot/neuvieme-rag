@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
 
 export interface UploadResult {
   uploaded: number;
@@ -8,7 +9,7 @@ export interface UploadResult {
 
 @Injectable({ providedIn: 'root' })
 export class WorkspaceService {
-  private base = '/api/workspace';
+  private base = `${environment.apiBaseUrl}/api/workspace`;
 
   constructor(private http: HttpClient) {}
 

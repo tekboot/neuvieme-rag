@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
 
 export interface ModelInfo {
   name: string;
@@ -18,7 +19,7 @@ export interface PullResult {
 
 @Injectable({ providedIn: 'root' })
 export class ModelsService {
-  private base = '/api/admin';
+  private base = `${environment.apiBaseUrl}/api/admin`;
 
   constructor(private http: HttpClient) {}
 

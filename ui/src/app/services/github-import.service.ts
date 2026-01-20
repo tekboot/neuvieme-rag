@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { FileNode } from '../models';
 import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
 
 export interface GithubFileResponse {
   name?: string;
@@ -59,7 +60,7 @@ export interface GithubImportResponse {
 
 @Injectable({ providedIn: 'root' })
 export class GithubImportService {
-  private base = '/api/github';
+  private base = `${environment.apiBaseUrl}/api/github`;
 
   constructor(private http: HttpClient) { }
 

@@ -163,11 +163,11 @@
               <span class="status-pill" [class]="getStatusClass(indexingStatus()!.status)">
                 {{ indexingStatus()!.status.replace('_', ' ') }}
               </span>
-              <span *ngIf="indexingStatus()!.status === 'in_progress'">
+              <span *ngIf="indexingStatus()!.status === 'IN_PROGRESS' || indexingStatus()!.status === 'PENDING'">
                 {{ indexingStatus()!.indexedFiles }} / {{ indexingStatus()!.totalFiles }} files
                 ({{ indexingStatus()!.totalChunks }} chunks)
               </span>
-              <span *ngIf="indexingStatus()!.status === 'completed'">
+              <span *ngIf="indexingStatus()!.status === 'COMPLETED' || indexingStatus()!.status === 'COMPLETED_WITH_ERRORS'">
                 {{ indexingStatus()!.totalFiles }} files indexed ({{ indexingStatus()!.totalChunks }} chunks)
               </span>
             </div>

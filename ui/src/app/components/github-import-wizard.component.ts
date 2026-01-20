@@ -1,9 +1,11 @@
-import { Component, EventEmitter, Output, signal, computed, OnInit } from '@angular/core';
+import { Component, EventEmitter, Output, Input, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Subscription } from 'rxjs';
 import { GithubImportService, GithubRepoInfo, GithubImportResponse, GithubBranch } from '../services/github-import.service';
 import { AuthService } from '../services/auth.service';
 import { ModelsService, ModelInfo } from '../services/models.service';
+import { IndexingService, IndexStatusResponse } from '../services/indexing.service';
 
 type WizardStep = 'auth' | 'select-repo' | 'options';
 type IndexMode = 'PREINDEX' | 'LAZY';
@@ -238,11 +240,54 @@ type IndexMode = 'PREINDEX' | 'LAZY';
             </div>
           </div>
 
-          <div class="error-box" *ngIf="error()">
+          <div class="error-box" *ngIf="error() && !indexingActive()">
             <span class="error-icon">⚠️</span>
             <div class="error-content">
               <div class="error-msg">{{ error() }}</div>
             </div>
+          </div>
+
+          <!-- Progress Overlay for Indexing -->
+          <div class="progress-overlay" *ngIf="indexingActive()">
+            <div class="progress-card">
+              <div class="progress-header">
+                <div class="progress-icon">
+                  <div class="spinner large"></div>
+                </div>
+                <div class="progress-title">Indexing Repository</div>
+                <div class="progress-subtitle">{{ selectedRepo()?.fullName }}</div>
+              </div>
+
+              <div class="progress-bar-container">
+                <div class="progress-bar">
+                  <div class="progress-fill" [style.width.%]="indexingProgress()"></div>
+                </div>
+                <div class="progress-percent">{{ indexingProgress() }}%</div>
+              </div>
+
+              <div class="progress-stats">
+                <div class="stat">
+                  <span class="stat-label">Files</span>
+                  <span class="stat-value">{{ indexingStatus()?.indexedFiles || 0 }} / {{ indexingStatus()?.totalFiles || 0 }}</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">Chunks</span>
+                  <span class="stat-value">{{ indexingStatus()?.totalChunks || 0 }}</span>
+                </div>
+              </div>
+
+              <div class="progress-message">{{ indexingMessage() }}</div>
+            </div>
+          </div>
+
+          <!-- Indexing Error Display -->
+          <div class="error-box indexing-error" *ngIf="indexingFailed()">
+            <span class="error-icon">⚠️</span>
+            <div class="error-content">
+              <div class="error-title">Indexing Failed</div>
+              <div class="error-msg">{{ indexingStatus()?.errorMessage || 'An error occurred during indexing.' }}</div>
+            </div>
+            <button class="btn-link" (click)="retryImport()">Retry</button>
           </div>
         </div>
 
@@ -250,7 +295,7 @@ type IndexMode = 'PREINDEX' | 'LAZY';
 
       <!-- Footer -->
       <div class="modal-footer">
-        <button class="btn secondary" (click)="close.emit()">Cancel</button>
+        <button class="btn secondary" (click)="close.emit()" [disabled]="indexingActive()">Cancel</button>
 
         <!-- Step 1: Auth buttons - ALWAYS show Authorize GitHub button -->
         <ng-container *ngIf="currentStep() === 'auth'">
@@ -288,10 +333,10 @@ type IndexMode = 'PREINDEX' | 'LAZY';
 
         <!-- Step 3: Options buttons -->
         <ng-container *ngIf="currentStep() === 'options'">
-          <button class="btn secondary" (click)="goToStep('select-repo')" [disabled]="importing()">Back</button>
+          <button class="btn secondary" (click)="goToStep('select-repo')" [disabled]="importing() || indexingActive()">Back</button>
           <button
             class="btn secondary"
-            [disabled]="importing() || loadingBranches()"
+            [disabled]="importing() || loadingBranches() || indexingActive()"
             (click)="doImport()"
           >
             {{ getImportButtonLabel() }}
@@ -797,15 +842,144 @@ type IndexMode = 'PREINDEX' | 'LAZY';
       opacity: 0.5;
       cursor: not-allowed;
     }
+
+    /* Progress Overlay */
+    .progress-overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      border-radius: 8px;
+    }
+
+    .progress-card {
+      width: 100%;
+      max-width: 380px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .progress-header {
+      margin-bottom: 24px;
+    }
+
+    .progress-icon {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .spinner.large {
+      width: 48px;
+      height: 48px;
+      border-width: 3px;
+    }
+
+    .progress-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .progress-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .progress-bar-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .progress-bar {
+      flex: 1;
+      height: 8px;
+      background: var(--border-color);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-color) 0%, #22c55e 100%);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .progress-percent {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      min-width: 45px;
+      text-align: right;
+    }
+
+    .progress-stats {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .progress-message {
+      font-size: 13px;
+      color: var(--text-secondary);
+      padding: 12px;
+      background: var(--bg-tertiary);
+      border-radius: 6px;
+    }
+
+    /* Indexing error styling */
+    .indexing-error {
+      margin-top: 16px;
+    }
+
+    .error-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: var(--error-color, #ef4444);
+    }
+
+    /* Make step-content relative for overlay positioning */
+    .step-content {
+      position: relative;
+      min-height: 200px;
+    }
   `]
 })
-export class GithubImportWizardComponent implements OnInit {
+export class GithubImportWizardComponent implements OnInit, OnDestroy {
+  @Input() isOAuthReturn = false; // Set to true when opening after OAuth redirect
   @Output() close = new EventEmitter<void>();
   @Output() imported = new EventEmitter<GithubImportResponse>();
 
   // State
   currentStep = signal<WizardStep>('auth');
-  checkingAuth = signal(true);
+  checkingAuth = signal(false); // Start as false - only true when actively checking
   githubConnected = signal(false);
   error = signal<string | null>(null);
 
@@ -829,6 +1003,25 @@ export class GithubImportWizardComponent implements OnInit {
   indexMode: IndexMode = 'PREINDEX';
   importing = signal(false);
 
+  // Indexing Progress State
+  indexingActive = signal(false);
+  indexingFailed = signal(false);
+  indexingStatus = signal<IndexStatusResponse | null>(null);
+  private indexingSubscription: Subscription | null = null;
+  private pendingImportResponse: GithubImportResponse | null = null;
+
+  // Computed: Progress percentage (0-100)
+  indexingProgress = computed(() => {
+    const status = this.indexingStatus();
+    return status?.progress ?? 0;
+  });
+
+  // Computed: Human-readable message
+  indexingMessage = computed(() => {
+    const status = this.indexingStatus();
+    return status?.message ?? 'Preparing to index...';
+  });
+
   // Computed
   filteredRepos = computed(() => {
     const filter = this.repoFilter.toLowerCase().trim();
@@ -843,20 +1036,30 @@ export class GithubImportWizardComponent implements OnInit {
   constructor(
     private githubService: GithubImportService,
     private auth: AuthService,
-    private modelsService: ModelsService
+    private modelsService: ModelsService,
+    private indexingService: IndexingService
   ) { }
 
   ngOnInit() {
-    console.log('[GithubWizard] Initializing wizard...');
+    console.log('[GithubWizard] Initializing wizard, isOAuthReturn:', this.isOAuthReturn);
 
-    // Restore owner draft from localStorage if returning from OAuth
+    // Restore owner draft from localStorage if it was saved before OAuth
     const savedOwner = localStorage.getItem('github_import_owner_draft');
     if (savedOwner) {
       this.githubOwner = savedOwner;
       localStorage.removeItem('github_import_owner_draft');
     }
 
-    this.checkAuthStatus();
+    if (this.isOAuthReturn) {
+      // Returning from OAuth redirect - check auth status
+      console.log('[GithubWizard] Returning from OAuth, checking auth...');
+      this.checkAuthStatus();
+    } else {
+      // Fresh modal open - don't auto-check auth, just show the auth step
+      console.log('[GithubWizard] Fresh open, showing auth step (no auto-check)');
+      this.checkingAuth.set(false);
+      this.githubConnected.set(false);
+    }
   }
 
   checkAuthStatus() {
@@ -870,7 +1073,7 @@ export class GithubImportWizardComponent implements OnInit {
         this.githubConnected.set(state.githubAuthenticated);
 
         if (state.githubAuthenticated) {
-          // Auto-advance to Step 2 (fetch repos) if already connected
+          // Auto-advance to Step 2 (fetch repos) if authenticated
           console.log('[GithubWizard] GitHub authenticated, auto-advancing to repo selection...');
           this.fetchRepos();
         }
@@ -1023,6 +1226,7 @@ export class GithubImportWizardComponent implements OnInit {
 
     this.importing.set(true);
     this.error.set(null);
+    this.indexingFailed.set(false);
 
     const payload = {
       owner: owner,
@@ -1037,9 +1241,19 @@ export class GithubImportWizardComponent implements OnInit {
 
     this.githubService.importRepo(payload).subscribe({
       next: (res) => {
-        console.log('[GithubWizard] Import success:', res);
+        console.log('[GithubWizard] Import response:', res);
         this.importing.set(false);
-        this.imported.emit(res);
+
+        // If indexing was started (PREINDEX mode), show progress and poll
+        if (res.indexingStarted && res.project?.id) {
+          console.log('[GithubWizard] Indexing started, beginning progress polling...');
+          this.pendingImportResponse = res;
+          this.indexingActive.set(true);
+          this.startIndexingPoll(res.project.id);
+        } else {
+          // No indexing (LAZY mode) - emit immediately
+          this.imported.emit(res);
+        }
       },
       error: (err) => {
         console.error('[GithubWizard] Import failed:', err);
@@ -1049,5 +1263,64 @@ export class GithubImportWizardComponent implements OnInit {
         this.error.set(message);
       }
     });
+  }
+
+  private startIndexingPoll(projectId: string) {
+    // Clean up any existing subscription
+    this.stopIndexingPoll();
+
+    console.log('[GithubWizard] Starting indexing poll for project:', projectId);
+
+    this.indexingSubscription = this.indexingService.pollStatus(projectId, 1000).subscribe({
+      next: (status) => {
+        console.log('[GithubWizard] Indexing status:', status.status, status.progress + '%');
+        this.indexingStatus.set(status);
+
+        // Check if completed
+        if (status.status === 'COMPLETED' || status.status === 'COMPLETED_WITH_ERRORS') {
+          console.log('[GithubWizard] Indexing completed successfully!');
+          this.indexingActive.set(false);
+          this.stopIndexingPoll();
+
+          // Emit the pending import response
+          if (this.pendingImportResponse) {
+            this.imported.emit(this.pendingImportResponse);
+            this.pendingImportResponse = null;
+          }
+        } else if (status.status === 'FAILED') {
+          console.error('[GithubWizard] Indexing failed:', status.errorMessage);
+          this.indexingActive.set(false);
+          this.indexingFailed.set(true);
+          this.stopIndexingPoll();
+        }
+      },
+      error: (err) => {
+        console.error('[GithubWizard] Indexing poll error:', err);
+        this.indexingActive.set(false);
+        this.indexingFailed.set(true);
+        this.error.set('Failed to track indexing progress: ' + (err.message || 'Unknown error'));
+        this.stopIndexingPoll();
+      }
+    });
+  }
+
+  private stopIndexingPoll() {
+    if (this.indexingSubscription) {
+      this.indexingSubscription.unsubscribe();
+      this.indexingSubscription = null;
+    }
+  }
+
+  retryImport() {
+    // Reset state and retry
+    this.indexingFailed.set(false);
+    this.indexingStatus.set(null);
+    this.error.set(null);
+    this.pendingImportResponse = null;
+    this.doImport();
+  }
+
+  ngOnDestroy() {
+    this.stopIndexingPoll();
   }
 }

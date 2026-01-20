@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
+import { environment } from '../../environments/environment';
 
 export interface OllamaModelDetails {
   parent_model: string;
@@ -57,7 +58,7 @@ const STATIC_MODELS: OllamaModel[] = [
 
 @Injectable({ providedIn: 'root' })
 export class OllamaService {
-  private base = '/api/ollama';
+  private base = `${environment.apiBaseUrl}/api/ollama`;
   private useStaticFallback = false;
 
   constructor(private http: HttpClient) { }

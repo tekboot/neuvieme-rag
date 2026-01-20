@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
 
 export interface RagChatRequest {
   message: string;
@@ -30,7 +31,7 @@ export interface RagChatResponse {
 
 @Injectable({ providedIn: 'root' })
 export class RagChatService {
-  private readonly baseUrl = '/api/ai';
+  private readonly baseUrl = `${environment.apiBaseUrl}/api/ai`;
 
   constructor(private http: HttpClient) { }
 

@@ -81,9 +81,12 @@ public class IndexingService {
             int chunkSize,
             int chunkOverlap) {
 
-        log.info(
-                "[IndexingService] Starting indexing for project {} with {} files (model={}, chunkSize={}, overlap={})",
-                projectId, fileContents.size(), embedModel, chunkSize, chunkOverlap);
+        log.info("╔══════════════════════════════════════════════════════════════════════════════");
+        log.info("║ [INDEXING START] Project: {}", projectId);
+        log.info("║   Total files discovered: {}", fileContents.size());
+        log.info("║   Embedding model: {}", embedModel);
+        log.info("║   Chunk size: {}, Overlap: {}", chunkSize, chunkOverlap);
+        log.info("╚══════════════════════════════════════════════════════════════════════════════");
 
         Project project = projectRepository.findById(projectId).orElse(null);
         if (project == null) {
@@ -112,10 +115,15 @@ public class IndexingService {
         indexStatusRepository.save(status);
 
         // Clear existing chunks for this project
+        log.info("[INDEXING] Clearing existing chunks for project {}", projectId);
         chunkRepository.deleteByProjectId(projectId);
 
         int indexedFiles = 0;
+        int failedFiles = 0;
         int totalChunks = 0;
+        int totalFilesToIndex = fileContents.size();
+
+        log.info("[INDEXING] Beginning file processing loop for {} files", totalFilesToIndex);
 
         for (Map.Entry<String, String> entry : fileContents.entrySet()) {
             String filePath = entry.getKey();
@@ -125,6 +133,8 @@ public class IndexingService {
                 // Chunk the file content
                 List<ChunkingService.ChunkResult> chunks = chunkingService.chunkFileContent(
                         filePath, content, chunkSize, chunkOverlap);
+
+                int fileChunkCount = 0;
 
                 // Generate embeddings and save chunks
                 for (ChunkingService.ChunkResult chunkResult : chunks) {
@@ -152,16 +162,26 @@ public class IndexingService {
                             EmbeddingService.toVectorString(embedding));
 
                     totalChunks++;
+                    fileChunkCount++;
                 }
 
                 indexedFiles++;
+
+                // Log progress every 10 files or at completion
+                if (indexedFiles % 10 == 0 || indexedFiles == totalFilesToIndex) {
+                    int progress = (int) ((indexedFiles * 100.0) / totalFilesToIndex);
+                    log.info("[INDEXING PROGRESS] {}/{} files ({}%), {} chunks created | Current: {}",
+                            indexedFiles, totalFilesToIndex, progress, totalChunks, filePath);
+                }
+
                 status.setIndexedFiles(indexedFiles);
                 status.setTotalChunks(totalChunks);
                 indexStatusRepository.save(status);
 
             } catch (Exception e) {
-                log.error("[IndexingService] Failed to index file {}: {}", filePath, e.getMessage());
-                status.setFailedFiles(status.getFailedFiles() + 1);
+                failedFiles++;
+                log.error("[INDEXING ERROR] Failed to index file {}: {}", filePath, e.getMessage());
+                status.setFailedFiles(failedFiles);
                 indexStatusRepository.save(status);
             }
         }
@@ -177,6 +197,16 @@ public class IndexingService {
 
         status.setCompletedAt(OffsetDateTime.now());
         indexStatusRepository.save(status);
+
+        log.info("╔══════════════════════════════════════════════════════════════════════════════");
+        log.info("║ [INDEXING COMPLETE] Project: {}", projectId);
+        log.info("║   Status: {}", status.getStatus());
+        log.info("║   Files indexed: {}/{}", indexedFiles, totalFilesToIndex);
+        log.info("║   Failed files: {}", failedFiles);
+        log.info("║   Total chunks created: {}", totalChunks);
+        log.info("║   Embedding model used: {}", embedModel);
+        log.info("║   DB inserts confirmed: {} rows in chunks table", totalChunks);
+        log.info("╚══════════════════════════════════════════════════════════════════════════════");
     }
 
     public IndexStatus getStatus(UUID projectId) {

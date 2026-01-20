@@ -117,6 +117,9 @@ export class AppComponent implements OnInit {
   // ✅ New Wizard State
   githubWizardOpen = signal(false);
 
+  // ✅ OAuth return detection - true when returning from GitHub OAuth redirect
+  isOAuthReturn = signal(false);
+
   // ✅ Local device files (path -> File)
   localFilesByPath = new Map<string, File>();
 
@@ -154,23 +157,18 @@ export class AppComponent implements OnInit {
     // Clear return URL state after OAuth redirect
     this.auth.checkReturnUrl();
 
-    // Check auth state on startup
-    this.auth.me().subscribe({
-      next: (state) => {
-        this.githubConnected.set(state.githubAuthenticated);
-      },
-      error: () => {
-        this.githubConnected.set(false);
-      }
-    });
-
     // Load available models for chat dropdown
     this.loadModels();
 
+    // Only open GitHub wizard after OAuth redirect - auth check happens inside the wizard
     if (localStorage.getItem('openGithubModalAfterLogin') === '1') {
       localStorage.removeItem('openGithubModalAfterLogin');
+      this.isOAuthReturn.set(true); // Signal to wizard that this is an OAuth return
       this.githubWizardOpen.set(true);
     }
+
+    // NO automatic auth check on app init
+    // Auth is checked only after user clicks "Authorize GitHub" or returns from OAuth
   }
 
   // ✅ Theme toggle
@@ -253,6 +251,11 @@ export class AppComponent implements OnInit {
 
   closeGithubModal() {
     this.githubWizardOpen.set(false);
+  }
+
+  closeGithubWizard() {
+    this.githubWizardOpen.set(false);
+    this.isOAuthReturn.set(false); // Reset OAuth return state when wizard closes
   }
 
   connectGithub() {
@@ -479,7 +482,7 @@ export class AppComponent implements OnInit {
       lastUpdated: Date.now()
     }, tree ?? []);
 
-    this.githubWizardOpen.set(false);
+    this.closeGithubWizard(); // Close wizard and reset OAuth state
 
     if (indexingStarted) {
       this.ragLog.set([...this.ragLog(), `Indexing started for ${project.displayName}...`]);

@@ -257,15 +257,22 @@ export class AdminComponent implements OnInit {
         console.log('[AdminComponent] Index status:', status);
         this.indexingStatus.set(status);
 
-        // Update project status
-        const newStatus = status.status as 'not_started' | 'in_progress' | 'completed' | 'error';
+        // Map backend status to UI status
+        const statusMap: Record<string, 'not_started' | 'in_progress' | 'completed' | 'error'> = {
+          'PENDING': 'not_started',
+          'IN_PROGRESS': 'in_progress',
+          'COMPLETED': 'completed',
+          'COMPLETED_WITH_ERRORS': 'completed',
+          'FAILED': 'error'
+        };
+        const newStatus = statusMap[status.status] || 'not_started';
         const updated = this.projects().map(p =>
           p.id === projectId ? { ...p, indexingStatus: newStatus } : p
         );
         this.projects.set(updated);
         this.selectedProject.set(updated.find(p => p.id === projectId) || null);
 
-        if (status.status === 'error') {
+        if (status.status === 'FAILED') {
           this.indexingError.set(status.errorMessage || 'Indexing failed');
         }
       },
@@ -330,11 +337,16 @@ export class AdminComponent implements OnInit {
       case 'active': return 'status-active';
       case 'installed': return 'status-installed';
       case 'indexed':
-      case 'completed': return 'status-active';
-      case 'in_progress': return 'status-installing';
+      case 'completed':
+      case 'COMPLETED':
+      case 'COMPLETED_WITH_ERRORS': return 'status-active';
+      case 'in_progress':
+      case 'IN_PROGRESS': return 'status-installing';
       case 'pending':
+      case 'PENDING':
       case 'not_started': return 'status-inactive';
-      case 'error': return 'status-error';
+      case 'error':
+      case 'FAILED': return 'status-error';
       default: return '';
     }
   }

@@ -203,7 +203,9 @@
   </main>
 
   <!-- GitHub Import Wizard -->
-  <app-github-import-wizard *ngIf="githubWizardOpen()" (close)="githubWizardOpen.set(false)"
+  <app-github-import-wizard *ngIf="githubWizardOpen()"
+    [isOAuthReturn]="isOAuthReturn()"
+    (close)="closeGithubWizard()"
     (imported)="onGithubImported($event)"></app-github-import-wizard>
 
   <!-- Ollama Fix Modal -->

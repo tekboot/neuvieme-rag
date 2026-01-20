@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
 
 export interface GithubContext {
   owner: string;
@@ -29,10 +30,13 @@ export interface IndexRequest {
 
 export interface IndexStatusResponse {
   projectId: string;
-  status: 'not_started' | 'in_progress' | 'completed' | 'error';
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'COMPLETED_WITH_ERRORS' | 'FAILED';
   totalFiles: number;
   indexedFiles: number;
+  failedFiles: number;
   totalChunks: number;
+  progress: number; // 0-100
+  message: string;
   embedModel: string | null;
   chunkSize: number | null;
   chunkOverlap: number | null;
@@ -43,7 +47,7 @@ export interface IndexStatusResponse {
 
 @Injectable({ providedIn: 'root' })
 export class IndexingService {
-  private readonly baseUrl = '/api/index';
+  private readonly baseUrl = `${environment.apiBaseUrl}/api/index`;
 
   constructor(private http: HttpClient) { }
 
@@ -81,13 +85,14 @@ export class IndexingService {
   /**
    * Poll for indexing status until complete or error.
    */
-  pollStatus(projectId: string, intervalMs = 2000): Observable<IndexStatusResponse> {
+  pollStatus(projectId: string, intervalMs = 1000): Observable<IndexStatusResponse> {
     return new Observable(subscriber => {
       const poll = () => {
         this.getStatus(projectId).subscribe({
           next: status => {
             subscriber.next(status);
-            if (status.status === 'in_progress') {
+            // Continue polling while PENDING or IN_PROGRESS
+            if (status.status === 'PENDING' || status.status === 'IN_PROGRESS') {
               setTimeout(poll, intervalMs);
             } else {
               subscriber.complete();

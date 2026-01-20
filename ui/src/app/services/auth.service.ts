@@ -1,6 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap } from 'rxjs';
+import { environment } from '../../environments/environment';
 
 export interface AuthState {
   authenticated: boolean;
@@ -10,7 +11,7 @@ export interface AuthState {
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private base = '';
+  private base = environment.apiBaseUrl;
 
   // Reactive auth state
   authState = signal<AuthState>({
@@ -22,10 +23,15 @@ export class AuthService {
 
   // Backend endpoint that tells if user is authenticated
   me(): Observable<AuthState> {
-    return this.http.get<AuthState>(`${this.base}/auth/me`, {
+    const url = `${this.base}/auth/me`;
+    console.log('[AuthService] Calling me() endpoint:', url);
+    return this.http.get<AuthState>(url, {
       withCredentials: true
     }).pipe(
-      tap(state => this.authState.set(state))
+      tap(state => {
+        console.log('[AuthService] Auth state received:', state);
+        this.authState.set(state);
+      })
     );
   }
 
@@ -33,7 +39,9 @@ export class AuthService {
   connectGithub() {
     // Store current URL for return after OAuth
     localStorage.setItem('deepcode_return_url', window.location.href);
-    window.location.href = `${this.base}/oauth2/authorization/github`;
+    const oauthUrl = `${this.base}/oauth2/authorization/github`;
+    console.log('[AuthService] Redirecting to GitHub OAuth:', oauthUrl);
+    window.location.href = oauthUrl;
   }
 
   // Check if GitHub auth is needed and redirect
