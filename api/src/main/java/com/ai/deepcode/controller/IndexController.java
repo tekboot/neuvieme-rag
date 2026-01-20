@@ -1,19 +1,14 @@
 package com.ai.deepcode.controller;
 
-import com.ai.deepcode.dto.RagFileRef;
-import com.ai.deepcode.dto.IndexRequest;
-import com.ai.deepcode.dto.IndexStatusResponse;
-import com.ai.deepcode.entity.IndexStatus;
-import com.ai.deepcode.entity.Project;
-import com.ai.deepcode.exception.ApiError;
-import com.ai.deepcode.repository.ProjectRepository;
-import com.ai.deepcode.service.GithubFileService;
-import com.ai.deepcode.service.IndexingService;
-import com.ai.deepcode.service.WorkspaceStore;
+import com.ai.deepcode.dto.*;
+import com.ai.deepcode.entity.*;
+import com.ai.deepcode.repository.*;
+import com.ai.deepcode.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -28,37 +23,36 @@ public class IndexController {
     private static final Logger log = LoggerFactory.getLogger(IndexController.class);
 
     private final IndexingService indexingService;
-    private final WorkspaceStore workspaceStore;
-    private final GithubFileService githubFileService;
+    private final FileContentService fileContentService;
     private final ProjectRepository projectRepository;
+    private final ProjectFileRepository projectFileRepository;
 
-    public IndexController(IndexingService indexingService, WorkspaceStore workspaceStore,
-            GithubFileService githubFileService,
-            ProjectRepository projectRepository) {
+    public IndexController(IndexingService indexingService,
+            FileContentService fileContentService,
+            ProjectRepository projectRepository,
+            ProjectFileRepository projectFileRepository) {
         this.indexingService = indexingService;
-        this.workspaceStore = workspaceStore;
-        this.githubFileService = githubFileService;
+        this.fileContentService = fileContentService;
         this.projectRepository = projectRepository;
+        this.projectFileRepository = projectFileRepository;
     }
 
     /**
      * Start indexing a project.
      * POST /api/index/project
-     *
-     * Supports two modes:
-     * 1. fileContents provided: use the provided content directly
-     * 2. filePaths provided with source="device": fetch content from WorkspaceStore
-     * 3. files provided with source="github": fetch content using GithubFileService
      */
     @PostMapping("/project")
-    public ResponseEntity<Map<String, Object>> indexProject(@RequestBody IndexRequest request) {
-        log.info("[Index] START projectId={} mode={} files={} embedModel={} chunkSize={} overlap={}",
+    public ResponseEntity<Map<String, Object>> indexProject(
+            @RequestBody IndexRequest request,
+            Authentication auth) {
+        log.info("[Index] START projectId={} mode={} files={} embedModel={} chunkSize={} overlap={} auth={}",
                 request.projectId(),
                 request.mode(),
                 request.files() != null ? request.files().size() : 0,
                 request.embedModel(),
                 request.chunkSize(),
-                request.chunkOverlap());
+                request.chunkOverlap(),
+                auth != null ? auth.getClass().getSimpleName() : "null");
 
         if (request.projectId() == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Project ID is required"));
@@ -75,39 +69,13 @@ public class IndexController {
             for (RagFileRef file : request.files()) {
                 String path = file.path();
                 try {
-                    // 1. Check text eligibility by extension/filename
-                    if (!isTextEligible(path)) {
-                        log.warn("[Index] SKIP: File not text-eligible: {}", path);
-                        errors.put(path, "Filtered: non-text or binary file type");
-                        continue;
-                    }
-
-                    String content = null;
-                    if ("github".equalsIgnoreCase(file.source())) {
-                        if (file.github() != null) {
-                            log.info("[Index] Fetching GitHub file: {}/{}", file.github().repo(), path);
-                            content = githubFileService.getFileContent(
-                                    file.github().owner(),
-                                    file.github().repo(),
-                                    path,
-                                    file.github().branch(),
-                                    file.github().subPath());
-                        } else {
-                            log.warn("[Index] GitHub file missing metadata: {}", path);
-                            errors.put(path, "Missing GitHub metadata");
-                        }
-                    } else if ("device".equalsIgnoreCase(file.source())) {
-                        log.info("[Index] Fetching Device file: {}", path);
-                        content = workspaceStore.getFileAsString(path);
-                    }
+                    // Pass authentication for GitHub file fetching
+                    String content = fileContentService.fetchContent(file, auth);
 
                     if (content != null && !content.isEmpty()) {
                         fileContents.put(path, content);
-                        log.info("[Index] FETCH OK: {} ({} chars)", path, content.length());
                     } else {
-                        log.warn("[Index] Content is null or empty for file: {}", path);
-                        errors.put(path,
-                                content == null ? "Content unavailable (404 or fetch error)" : "File is empty");
+                        errors.put(path, "Content unavailable or non-text eligible");
                     }
                 } catch (Exception e) {
                     log.error("[Index] Error fetching file {}: {}", path, e.getMessage());
@@ -124,20 +92,15 @@ public class IndexController {
                     "details", errors));
         }
 
-        log.info("[Index] Successfully fetched {} files, proceeding to index", fileContents.size());
-
-        // Ensure project exists in database (create if not)
+        // Ensure project exists in database
         Project project = projectRepository.findById(request.projectId()).orElse(null);
         if (project == null) {
-            log.info("[Index] Project {} not found in DB, creating new project record", request.projectId());
             project = new Project();
             project.setId(request.projectId());
             project.setName(request.projectId().toString());
             project.setDisplayName("Project " + request.projectId().toString().substring(0, 8));
             project.setSource(request.source() != null ? request.source() : "device");
-            project.setFileCount(fileContents.size());
 
-            // Set github metadata if available from first file
             if (request.files() != null && !request.files().isEmpty()) {
                 var firstFile = request.files().get(0);
                 if (firstFile.github() != null) {
@@ -146,14 +109,33 @@ public class IndexController {
                     project.setGithubBranch(firstFile.github().branch());
                 }
             }
-
-            projectRepository.save(project);
-            log.info("[Index] Created project record: id={}, source={}", project.getId(), project.getSource());
-        } else {
-            log.info("[Index] Project {} already exists in DB", request.projectId());
+            project = projectRepository.save(project);
         }
 
-        // Proceed to index the fetched content
+        // PERSIST FILE TREE for future 'mode=all' RAG search
+        if (request.files() != null && !request.files().isEmpty()) {
+            final Project finalProject = project;
+            // Best effort: only insert new ones or overwrite? Let's just update all.
+            for (RagFileRef f : request.files()) {
+                try {
+                    ProjectFile pf = new ProjectFile();
+                    pf.setProject(finalProject);
+                    pf.setPath(f.path());
+                    pf.setSource(f.source());
+                    if (f.github() != null) {
+                        pf.setGithubOwner(f.github().owner());
+                        pf.setGithubRepo(f.github().repo());
+                        pf.setGithubBranch(f.github().branch());
+                        pf.setGithubSubPath(f.github().subPath());
+                    }
+                    projectFileRepository.save(pf);
+                } catch (Exception e) {
+                    // Ignore duplicate key errors if index already has them
+                }
+            }
+        }
+
+        // Proceed to index
         indexingService.indexProject(
                 request.projectId(),
                 fileContents,

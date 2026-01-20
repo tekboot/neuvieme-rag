@@ -7,9 +7,9 @@
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="title">EXPLORER</div>
-      <div class="row">
-        <button class="btn small" (click)="toggleRagView()" title="Index Settings">⚡</button>
+      <div class="row toolbar-actions">
         <button class="btn" (click)="toggleImportMenu()">Import ▾</button>
+        <button class="btn" (click)="toggleRagView()">Indexing</button>
       </div>
     </div>
 
@@ -181,7 +181,8 @@
               <textarea [(ngModel)]="draft" class="input rag-input"
                 placeholder="Ask a question about selected files..."></textarea>
 
-              <button class="btn primary full" (click)="send($event)" [disabled]="sending() || !draft.trim()">
+              <button class="btn primary full" (click)="send($event)"
+                [disabled]="sending() || !draft.trim() || (contextMode() === 'selected' && selectedFilePaths().length === 0)">
                 {{ sending() ? 'Processing...' : 'Ask' }}
               </button>
 
@@ -201,49 +202,9 @@
 
   </main>
 
-  <!-- GitHub Modal (unchanged) -->
-  <div class="backdrop" *ngIf="githubModalOpen()" (click)="closeGithubModal()"></div>
-  <div class="modal" *ngIf="githubModalOpen()">
-    <!-- ... existing modal content ... -->
-    <div class="modal-header">
-      <div class="modal-title">Import from GitHub</div>
-      <button class="icon-btn" (click)="closeGithubModal()">✕</button>
-    </div>
-    <div class="modal-body">
-      <label class="field">
-        <span>Owner</span>
-        <input class="text" [(ngModel)]="ghOwner" name="ghOwner" placeholder="e.g. octocat" />
-      </label>
-      <label class="field">
-        <span>Repo</span>
-        <input class="text" [(ngModel)]="ghRepo" name="ghRepo" placeholder="e.g. hello-world" />
-      </label>
-      <label class="field">
-        <span>Branch (optional)</span>
-        <input class="text" [(ngModel)]="ghBranch" name="ghBranch" placeholder="main" />
-      </label>
-      <label class="field">
-        <span>Sub-path (optional)</span>
-        <input class="text" [(ngModel)]="ghSubPath" name="ghSubPath" placeholder="src/app" />
-      </label>
-      <div class="hint">
-        This UI expects your backend endpoint <code>/api/github/import</code> to return a <code>FileNode[]</code> tree.
-      </div>
-      <div class="error" *ngIf="ghError()">
-        <span>{{ ghError() }}</span>
-        <button class="btn-link" (click)="retryGithubImport()" *ngIf="!ghLoading()">Retry</button>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn secondary" (click)="closeGithubModal()">Cancel</button>
-      <button class="btn secondary" *ngIf="!githubConnected()" (click)="connectGithub()" [disabled]="checkingGithub()">
-        {{ checkingGithub() ? 'Checking…' : 'Connect GitHub' }}
-      </button>
-      <button class="btn primary" *ngIf="githubConnected()" [disabled]="ghLoading()" (click)="importFromGithub()">
-        {{ ghLoading() ? 'Importing…' : 'Import' }}
-      </button>
-    </div>
-  </div>
+  <!-- GitHub Import Wizard -->
+  <app-github-import-wizard *ngIf="githubWizardOpen()" (close)="githubWizardOpen.set(false)"
+    (imported)="onGithubImported($event)"></app-github-import-wizard>
 
   <!-- Ollama Fix Modal -->
   <div class="backdrop" *ngIf="ollamaFixModalOpen()" (click)="closeOllamaFixModal()"></div>

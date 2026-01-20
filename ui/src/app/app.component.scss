@@ -45,6 +45,12 @@
   flex: 0 0 auto;
 }
 
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .title {
   font-size: 12px;
   letter-spacing: 0.12em;

@@ -1,0 +1,76 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] --------------------------< com.ai:deepcode >---------------------------
+[INFO] Building deepcode 0.0.1-SNAPSHOT
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- maven-resources-plugin:3.3.1:resources (default-resources) @ deepcode ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 5 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- maven-compiler-plugin:3.14.1:compile (default-compile) @ deepcode ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- maven-resources-plugin:3.3.1:testResources (default-testResources) @ deepcode ---
+[INFO] skip non existing resourceDirectory C:\Users\sando\OneDrive\Desktop\deepcode\api\src\test\resources
+[INFO] 
+[INFO] --- maven-compiler-plugin:3.14.1:testCompile (default-testCompile) @ deepcode ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- maven-surefire-plugin:3.5.4:test (default-test) @ deepcode ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.ai.deepcode.controller.AiControllerRAGThinTest
+Java HotSpot(TM) 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+23:52:55.566 [main] INFO com.ai.deepcode.controller.AiController -- [AiController] RAG chat request: strategy=reindex, message='query', projects=1, topK=5, model='qwen2.5-coder'
+23:52:55.575 [main] WARN com.ai.deepcode.controller.AiController -- [AiController] No persisted files found for project cdb681dc-4969-4408-8bf7-a9617c474886, attempting recovery
+23:52:55.578 [main] INFO com.ai.deepcode.controller.AiController -- [AiController] Recovered 1 paths from existing chunks for GitHub project cdb681dc-4969-4408-8bf7-a9617c474886
+23:52:55.579 [main] INFO com.ai.deepcode.controller.AiController -- [AiController] Success: Recovered 1 files for project cdb681dc-4969-4408-8bf7-a9617c474886
+23:52:55.636 [main] INFO com.ai.deepcode.controller.AiController -- [AiController] RAG chat request: strategy=reindex, message='query', projects=1, topK=5, model='default'
+23:52:55.665 [main] INFO com.ai.deepcode.controller.AiController -- [AiController] RAG chat request: strategy=reindex, message='What does this app do?', projects=1, topK=5, model='qwen2.5-coder'
+[ERROR] Tests run: 3, Failures: 0, Errors: 2, Skipped: 0, Time elapsed: 1.789 s <<< FAILURE! -- in com.ai.deepcode.controller.AiControllerRAGThinTest
+[ERROR] com.ai.deepcode.controller.AiControllerRAGThinTest.testChatWithRag_ReindexAll_HealingFallback -- Time elapsed: 1.701 s <<< ERROR!
+java.lang.NullPointerException: Cannot invoke "com.ai.deepcode.repository.IndexStatusRepository.findByProjectId(java.util.UUID)" because "this.indexStatusRepository" is null
+	at com.ai.deepcode.controller.AiController.chatWithRag(AiController.java:348)
+	at com.ai.deepcode.controller.AiControllerRAGThinTest.testChatWithRag_ReindexAll_HealingFallback(AiControllerRAGThinTest.java:119)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+
+[ERROR] com.ai.deepcode.controller.AiControllerRAGThinTest.testChatWithRag_ReindexSelected_Success -- Time elapsed: 0.014 s <<< ERROR!
+java.lang.NullPointerException: Cannot invoke "com.ai.deepcode.repository.IndexStatusRepository.findByProjectId(java.util.UUID)" because "this.indexStatusRepository" is null
+	at com.ai.deepcode.controller.AiController.chatWithRag(AiController.java:348)
+	at com.ai.deepcode.controller.AiControllerRAGThinTest.testChatWithRag_ReindexSelected_Success(AiControllerRAGThinTest.java:72)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Errors: 
+[ERROR]   AiControllerRAGThinTest.testChatWithRag_ReindexAll_HealingFallback:119 » NullPointer Cannot invoke "com.ai.deepcode.repository.IndexStatusRepository.findByProjectId(java.util.UUID)" because "this.indexStatusRepository" is null
+[ERROR]   AiControllerRAGThinTest.testChatWithRag_ReindexSelected_Success:72 » NullPointer Cannot invoke "com.ai.deepcode.repository.IndexStatusRepository.findByProjectId(java.util.UUID)" because "this.indexStatusRepository" is null
+[INFO] 
+[ERROR] Tests run: 3, Failures: 0, Errors: 2, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  5.628 s
+[INFO] Finished at: 2026-01-18T23:52:55+01:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.4:test (default-test) on project deepcode: 
+[ERROR] 
+[ERROR] See C:\Users\sando\OneDrive\Desktop\deepcode\api\target\surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

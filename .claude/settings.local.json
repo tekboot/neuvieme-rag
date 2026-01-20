@@ -4,7 +4,10 @@
       "Bash(npx ng build:*)",
       "Bash(mvn compile:*)",
       "Bash(dir)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(cmd /c \"cd /d c:\\\\Users\\\\sando\\\\OneDrive\\\\Desktop\\\\deepcode\\\\api && mvnw.cmd compile -q\")",
+      "Bash(cmd /c \"cd /d c:\\\\Users\\\\sando\\\\OneDrive\\\\Desktop\\\\deepcode\\\\ui && npm run build 2>&1\")",
+      "Bash(cmd /c \"cd /d c:\\\\Users\\\\sando\\\\OneDrive\\\\Desktop\\\\deepcode\\\\ui && npx ng build --configuration=development 2>&1\")"
     ]
   }
 }

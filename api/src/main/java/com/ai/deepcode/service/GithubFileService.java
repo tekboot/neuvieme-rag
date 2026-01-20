@@ -29,24 +29,31 @@ public class GithubFileService {
     }
 
     /**
-     * Fetch file content from GitHub using the current user's OAuth token.
+     * Fetch file content from GitHub using the current user's OAuth token from security context.
+     */
+    public String getFileContent(String owner, String repo, String path, String branch, String subPath) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return getFileContent(owner, repo, path, branch, subPath, auth);
+    }
+
+    /**
+     * Fetch file content from GitHub using the provided authentication.
      *
      * @param owner   Repository owner
      * @param repo    Repository name
      * @param path    File path within repo
      * @param branch  Branch/ref (can be null for default)
      * @param subPath Optional subPath prefix that was used during import
+     * @param auth    Authentication object (must be OAuth2AuthenticationToken for GitHub)
      * @return File content as String
      * @throws ResponseStatusException with 401 if GitHub auth is missing or expired
      * @throws ResponseStatusException with 500 for other errors
      */
-    public String getFileContent(String owner, String repo, String path, String branch, String subPath) {
+    public String getFileContent(String owner, String repo, String path, String branch, String subPath,
+            Authentication auth) {
         log.info("[GithubFileService] === START getFileContent ===");
         log.info("[GithubFileService] Input: owner={}, repo={}, path={}, branch={}, subPath={}",
                 owner, repo, path, branch, subPath);
-
-        // Step 1: Get authentication from security context
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 
         log.info("[GithubFileService] Authentication: present={}, type={}",
                 auth != null,
@@ -58,7 +65,7 @@ public class GithubFileService {
                     "GITHUB_AUTH_REQUIRED: GitHub authentication required. Please connect your GitHub account.");
         }
 
-        // Step 2: Check if it's an OAuth2 token
+        // Check if it's an OAuth2 token
         if (!(auth instanceof OAuth2AuthenticationToken)) {
             log.error("[GithubFileService] FAIL: Authentication is not OAuth2AuthenticationToken, got: {}. " +
                     "User may not be logged in via GitHub OAuth.", auth.getClass().getName());
@@ -66,7 +73,7 @@ public class GithubFileService {
                     "GITHUB_AUTH_REQUIRED: GitHub authentication required. Please connect your GitHub account.");
         }
 
-        // Step 3: Get the access token
+        // Get the access token
         String token;
         try {
             token = tokenService.getAccessToken(auth);
@@ -83,7 +90,7 @@ public class GithubFileService {
                     "GITHUB_TOKEN_EXPIRED: GitHub session expired. Please reconnect your GitHub account.");
         }
 
-        // Step 4: Build the full path
+        // Build the full path
         String fullPath = buildFullPath(subPath, path);
         log.info("[GithubFileService] Full path built: {}", fullPath);
 

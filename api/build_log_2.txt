@@ -1,0 +1,114 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] --------------------------< com.ai:deepcode >---------------------------
+[INFO] Building deepcode 0.0.1-SNAPSHOT
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- maven-resources-plugin:3.3.1:resources (default-resources) @ deepcode ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 5 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- maven-compiler-plugin:3.14.1:compile (default-compile) @ deepcode ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 64 source files with javac [debug parameters release 17] to target\classes
+[INFO] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/api/GithubApiClient.java: Some input files use unchecked or unsafe operations.
+[INFO] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/api/GithubApiClient.java: Recompile with -Xlint:unchecked for details.
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[42,13] cannot find symbol
+  symbol: variable ollamaService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[43,13] cannot find symbol
+  symbol: variable workspaceStore
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[44,13] cannot find symbol
+  symbol: variable fileContentService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[45,13] cannot find symbol
+  symbol: variable vectorSearchService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[46,13] cannot find symbol
+  symbol: variable indexingService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[73,25] cannot find symbol
+  symbol:   variable ollamaService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[91,32] cannot find symbol
+  symbol:   variable workspaceStore
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[215,16] cannot find symbol
+  symbol:   variable fileContentService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[219,16] cannot find symbol
+  symbol:   variable fileContentService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[328,38] cannot find symbol
+  symbol:   variable fileContentService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[341,17] cannot find symbol
+  symbol:   variable indexingService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[358,64] cannot find symbol
+  symbol:   variable vectorSearchService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[368,29] cannot find symbol
+  symbol:   variable vectorSearchService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[374,25] cannot find symbol
+  symbol:   variable ollamaService
+  location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[411,32] cannot find symbol
+  symbol:   variable workspaceStore
+  location: class com.ai.deepcode.controller.AiController
+[INFO] 15 errors 
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  3.676 s
+[INFO] Finished at: 2026-01-18T23:51:00+01:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.1:compile (default-compile) on project deepcode: Compilation failure: Compilation failure: 
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[42,13] cannot find symbol
+[ERROR]   symbol: variable ollamaService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[43,13] cannot find symbol
+[ERROR]   symbol: variable workspaceStore
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[44,13] cannot find symbol
+[ERROR]   symbol: variable fileContentService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[45,13] cannot find symbol
+[ERROR]   symbol: variable vectorSearchService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[46,13] cannot find symbol
+[ERROR]   symbol: variable indexingService
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[73,25] cannot find symbol
+[ERROR]   symbol:   variable ollamaService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[91,32] cannot find symbol
+[ERROR]   symbol:   variable workspaceStore
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[215,16] cannot find symbol
+[ERROR]   symbol:   variable fileContentService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[219,16] cannot find symbol
+[ERROR]   symbol:   variable fileContentService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[328,38] cannot find symbol
+[ERROR]   symbol:   variable fileContentService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[341,17] cannot find symbol
+[ERROR]   symbol:   variable indexingService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[358,64] cannot find symbol
+[ERROR]   symbol:   variable vectorSearchService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[368,29] cannot find symbol
+[ERROR]   symbol:   variable vectorSearchService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[374,25] cannot find symbol
+[ERROR]   symbol:   variable ollamaService
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] /C:/Users/sando/OneDrive/Desktop/deepcode/api/src/main/java/com/ai/deepcode/controller/AiController.java:[411,32] cannot find symbol
+[ERROR]   symbol:   variable workspaceStore
+[ERROR]   location: class com.ai.deepcode.controller.AiController
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

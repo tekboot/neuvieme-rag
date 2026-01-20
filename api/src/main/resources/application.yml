@@ -31,8 +31,8 @@ spring:
       client:
         registration:
           github:
-            client-id: Ov23li0wCC1ULAfj7kor
-            client-secret: b9810418b3723e76b99376eb21112f9ab8bcea85
+            client-id: ${GITHUB_CLIENT_ID:Ov23li0wCC1ULAfj7kor}
+            client-secret: ${GITHUB_CLIENT_SECRET:b9810418b3723e76b99376eb21112f9ab8bcea85}
             scope: repo,read:user
         provider:
           github:

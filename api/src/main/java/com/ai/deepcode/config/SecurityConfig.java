@@ -17,7 +17,6 @@ public class SecurityConfig {
     @Value("${app.ui-base-url}")
     private String uiBaseUrl;
 
-
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -30,8 +29,8 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint((req, res, e) -> res.sendError(401)))
-                .oauth2Login(o -> o.defaultSuccessUrl("/", true))
-                .logout(logout -> logout.logoutSuccessUrl("/"));
+                .oauth2Login(o -> o.defaultSuccessUrl(uiBaseUrl, true))
+                .logout(logout -> logout.logoutSuccessUrl(uiBaseUrl));
 
         return http.build();
     }
@@ -39,7 +38,7 @@ public class SecurityConfig {
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cfg = new CorsConfiguration();
-        cfg.setAllowedOrigins(List.of("http://89.116.229.90"));
+        cfg.setAllowedOrigins(List.of(uiBaseUrl));
         cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         cfg.setAllowedHeaders(List.of("*"));
         cfg.setAllowCredentials(true);

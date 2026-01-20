@@ -23,6 +23,9 @@ public interface ChunkRepository extends JpaRepository<Chunk, UUID>, CustomChunk
     @Query("DELETE FROM Chunk c WHERE c.project.id = :projectId")
     void deleteByProjectId(@Param("projectId") UUID projectId);
 
+    @Query("SELECT DISTINCT c.filePath FROM Chunk c WHERE c.project.id = :projectId")
+    List<String> findDistinctFilePathsByProjectId(@Param("projectId") UUID projectId);
+
     /**
      * Vector similarity search using pgvector's cosine distance.
      * Returns chunks ordered by similarity (closest first).

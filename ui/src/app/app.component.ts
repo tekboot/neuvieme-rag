@@ -1,4 +1,4 @@
-import { Component, computed, signal, OnInit } from '@angular/core';
+import { Component, computed, signal, OnInit, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterOutlet, Router, RouterLink, NavigationEnd } from '@angular/router';
@@ -16,6 +16,8 @@ import { ThemeService } from './services/theme.service';
 import { ProjectStore } from './services/project-store.service';
 import { IndexingService, IndexRequest } from './services/indexing.service';
 import { RagChatService } from './services/rag-chat.service';
+import { GithubImportWizardComponent } from './components/github-import-wizard.component';
+import { GithubImportResponse } from './services/github-import.service';
 
 function uid(prefix = 'id') {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -26,7 +28,7 @@ type GithubCtx = { owner: string; repo: string; branch?: string; subPath?: strin
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, FileTreeComponent, HttpClientModule, RouterOutlet, RouterLink],
+  imports: [CommonModule, FormsModule, FileTreeComponent, HttpClientModule, RouterOutlet, RouterLink, GithubImportWizardComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss']
 })
@@ -109,19 +111,18 @@ export class AppComponent implements OnInit {
 
   importMenuOpen = signal(false);
 
-  githubModalOpen = signal(false);
-  ghOwner = '';
-  ghRepo = '';
-  ghBranch = 'main';
-  ghSubPath = '';
-  ghLoading = signal(false);
-  ghError = signal<string | null>(null);
-
   githubConnected = signal(false);
   checkingGithub = signal(false);
 
+  // ✅ New Wizard State
+  githubWizardOpen = signal(false);
+
   // ✅ Local device files (path -> File)
   localFilesByPath = new Map<string, File>();
+
+  // ✅ ViewChild references for file inputs
+  @ViewChild('fileInput') fileInputRef!: ElementRef<HTMLInputElement>;
+  @ViewChild('folderInput') folderInputRef!: ElementRef<HTMLInputElement>;
 
   // ✅ Preview modal state
   previewOpen = signal(false);
@@ -145,6 +146,9 @@ export class AppComponent implements OnInit {
   ollamaErrorDetails = signal<any>(null);
   noContentErrorDetails = signal<any>(null);
 
+  // ✅ Device import status
+  deviceImportError = signal<string | null>(null);
+
 
   ngOnInit(): void {
     // Clear return URL state after OAuth redirect
@@ -165,7 +169,7 @@ export class AppComponent implements OnInit {
 
     if (localStorage.getItem('openGithubModalAfterLogin') === '1') {
       localStorage.removeItem('openGithubModalAfterLogin');
-      this.openGithubModal();
+      this.githubWizardOpen.set(true);
     }
   }
 
@@ -214,6 +218,16 @@ export class AppComponent implements OnInit {
 
   triggerDeviceImport() {
     this.importMenuOpen.set(false);
+    // Trigger the file picker after a short delay to ensure menu closes
+    setTimeout(() => {
+      if (this.fileInputRef?.nativeElement) {
+        this.fileInputRef.nativeElement.value = '';
+        this.fileInputRef.nativeElement.click();
+      } else {
+        console.error('[DeviceImport] File input reference not available');
+        alert('Unable to open file picker. Please use the "Pick files" button in the sidebar.');
+      }
+    }, 50);
   }
 
   openDeviceFilePicker(fileInput: HTMLInputElement) {
@@ -234,20 +248,11 @@ export class AppComponent implements OnInit {
 
   openGithubModal() {
     this.importMenuOpen.set(false);
-    this.githubModalOpen.set(true);
-    this.ghError.set(null);
-
-    this.checkingGithub.set(true);
-    this.auth.me().subscribe({
-      next: (state) => this.githubConnected.set(state.githubAuthenticated),
-      error: () => this.githubConnected.set(false),
-      complete: () => this.checkingGithub.set(false),
-    });
+    this.githubWizardOpen.set(true);
   }
 
   closeGithubModal() {
-    this.githubModalOpen.set(false);
-    this.ghError.set(null);
+    this.githubWizardOpen.set(false);
   }
 
   connectGithub() {
@@ -294,54 +299,86 @@ export class AppComponent implements OnInit {
 
   // ---------- Device import (APPEND to From device root) ----------
   onDeviceFilesSelected(ev: Event) {
-    const DEBUG = true;
-    if (DEBUG) console.log('[DeviceImport] Files selected event triggered');
-    const input = ev.target as HTMLInputElement;
-    const files = Array.from(input.files ?? []);
-    if (DEBUG) console.log(`[DeviceImport] Selected ${files.length} files`);
-    if (!files.length) return;
+    console.log('[DeviceImport] Files selected event triggered');
+    this.deviceImportError.set(null);
 
-    // ✅ append to local map (keep previously imported ones too)
-    const filesWithPath: { path: string; file: File }[] = [];
-    for (const f of files) {
-      const p = ((f as any).webkitRelativePath || f.name) as string;
-      this.localFilesByPath.set(p, f);
-      filesWithPath.push({ path: p, file: f });
+    try {
+      const input = ev.target as HTMLInputElement;
+      const files = Array.from(input.files ?? []);
+      console.log(`[DeviceImport] Selected ${files.length} files`);
+
+      if (!files.length) {
+        console.log('[DeviceImport] No files selected (user cancelled or empty selection)');
+        return;
+      }
+
+      // ✅ append to local map (keep previously imported ones too)
+      const filesWithPath: { path: string; file: File }[] = [];
+      for (const f of files) {
+        const p = ((f as any).webkitRelativePath || f.name) as string;
+        this.localFilesByPath.set(p, f);
+        filesWithPath.push({ path: p, file: f });
+        console.log(`[DeviceImport] Added file: ${p} (${f.size} bytes)`);
+      }
+
+      const newNodes = buildTreeFromFileList(files.map(f => ({ path: f.name, name: f.name })));
+      console.log(`[DeviceImport] Built ${newNodes.length} tree nodes`);
+
+      this.upsertDeviceRootAndMerge(newNodes);
+      console.log(`[DeviceImport] Successfully added ${files.length} files to Explorer`);
+
+      // ✅ Upload to backend for AI context
+      this.uploadDeviceFilesToBackend(filesWithPath);
+    } catch (error) {
+      console.error('[DeviceImport] Error importing files:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error importing files';
+      this.deviceImportError.set(errorMsg);
+      alert(`Failed to import files: ${errorMsg}`);
     }
-
-    const newNodes = buildTreeFromFileList(files.map(f => ({ path: f.name, name: f.name })));
-    this.upsertDeviceRootAndMerge(newNodes);
-
-    // ✅ Upload to backend for AI context
-    this.uploadDeviceFilesToBackend(filesWithPath);
   }
 
   onDeviceFolderSelected(ev: Event) {
-    const DEBUG = true;
-    if (DEBUG) console.log('[DeviceImport] Folder selected event triggered');
-    const input = ev.target as HTMLInputElement;
-    const files = Array.from(input.files ?? []);
-    if (DEBUG) console.log(`[DeviceImport] Selected ${files.length} files in folder`);
-    if (!files.length) return;
+    console.log('[DeviceImport] Folder selected event triggered');
+    this.deviceImportError.set(null);
 
-    // ✅ append to local map (keep previously imported ones too)
-    const filesWithPath: { path: string; file: File }[] = [];
-    for (const f of files) {
-      const p = ((f as any).webkitRelativePath || f.name) as string;
-      this.localFilesByPath.set(p, f);
-      filesWithPath.push({ path: p, file: f });
+    try {
+      const input = ev.target as HTMLInputElement;
+      const files = Array.from(input.files ?? []);
+      console.log(`[DeviceImport] Selected ${files.length} files in folder`);
+
+      if (!files.length) {
+        console.log('[DeviceImport] No files selected (user cancelled or empty folder)');
+        return;
+      }
+
+      // ✅ append to local map (keep previously imported ones too)
+      const filesWithPath: { path: string; file: File }[] = [];
+      for (const f of files) {
+        const p = ((f as any).webkitRelativePath || f.name) as string;
+        this.localFilesByPath.set(p, f);
+        filesWithPath.push({ path: p, file: f });
+      }
+
+      const entries = files.map(f => ({
+        path: (f as any).webkitRelativePath || f.name,
+        name: f.name
+      }));
+
+      console.log(`[DeviceImport] Building tree from ${entries.length} entries`);
+      const newNodes = buildTreeFromFileList(entries);
+      console.log(`[DeviceImport] Built ${newNodes.length} root nodes`);
+
+      this.upsertDeviceRootAndMerge(newNodes);
+      console.log(`[DeviceImport] Successfully added folder with ${files.length} files to Explorer`);
+
+      // ✅ Upload to backend for AI context
+      this.uploadDeviceFilesToBackend(filesWithPath);
+    } catch (error) {
+      console.error('[DeviceImport] Error importing folder:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error importing folder';
+      this.deviceImportError.set(errorMsg);
+      alert(`Failed to import folder: ${errorMsg}`);
     }
-
-    const entries = files.map(f => ({
-      path: (f as any).webkitRelativePath || f.name,
-      name: f.name
-    }));
-
-    const newNodes = buildTreeFromFileList(entries);
-    this.upsertDeviceRootAndMerge(newNodes);
-
-    // ✅ Upload to backend for AI context
-    this.uploadDeviceFilesToBackend(filesWithPath);
   }
 
   private uploadDeviceFilesToBackend(filesWithPath: { path: string; file: File }[]) {
@@ -365,10 +402,12 @@ export class AppComponent implements OnInit {
   }
 
   private upsertDeviceRootAndMerge(newNodes: FileNode[]) {
+    console.log('[DeviceImport] upsertDeviceRootAndMerge called with', newNodes.length, 'new nodes');
     const roots = [...this.fileTree()];
     let deviceRoot = roots.find(r => r.id === this.deviceRootId);
 
     if (!deviceRoot) {
+      console.log('[DeviceImport] Creating new device root folder');
       deviceRoot = {
         id: this.deviceRootId,
         name: 'From device',
@@ -382,9 +421,12 @@ export class AppComponent implements OnInit {
     }
 
     deviceRoot.expanded = true;
+    const prevChildCount = deviceRoot.children?.length || 0;
     deviceRoot.children = mergeNodeArrays(deviceRoot.children || [], newNodes);
+    console.log('[DeviceImport] Merged children:', prevChildCount, '->', deviceRoot.children.length);
 
     this.fileTree.set(roots);
+    console.log('[DeviceImport] File tree updated, total roots:', roots.length);
 
     // ✅ Track device project in ProjectStore (with file tree)
     const fileCount = this.countFiles(deviceRoot.children || []);
@@ -398,139 +440,51 @@ export class AppComponent implements OnInit {
   }
 
   // ---------- GitHub import (NEW ROOT per repo) ----------
-  retryGithubImport() {
-    this.ghError.set(null);
-    this.importFromGithub();
-  }
+  onGithubImported(res: GithubImportResponse) {
+    console.log('[AppComponent] GitHub Import Success:', res);
+    const { project, tree, indexingStarted } = res;
 
-  importFromGithub() {
-    this.ghError.set(null);
+    const roots = [...this.fileTree()];
 
-    if (!this.githubConnected()) {
-      this.ghError.set('Not authenticated. Click "Connect GitHub" first.');
-      return;
-    }
-
-    if (!this.ghOwner.trim() || !this.ghRepo.trim()) {
-      this.ghError.set('Owner and repo are required.');
-      return;
-    }
-
-    const owner = this.ghOwner.trim();
-    const repo = this.ghRepo.trim();
-    const branch = (this.ghBranch?.trim() || undefined);
-    const subPath = (this.ghSubPath?.trim() || undefined);
-
-    this.ghLoading.set(true);
-    this.ghError.set(null);
-
-    console.log('[GithubImport] Sending request:', { owner, repo, branch, subPath });
-
-    this.gh.importRepo({ owner, repo, branch, subPath }).subscribe({
-      next: (res) => {
-        console.log('[GithubImport] Response received:', res);
-
-        // Validate response structure
-        if (!res || typeof res !== 'object') {
-          console.error('[GithubImport] Invalid response: not an object', res);
-          this.ghError.set('Invalid response from server: expected object with project and tree');
-          this.ghLoading.set(false);
-          return;
-        }
-
-        // Check for error response (backend may return 200 with error body)
-        if ('code' in res && 'message' in res) {
-          console.error('[GithubImport] Server returned error:', res);
-          this.ghError.set((res as any).message || 'Import failed');
-          this.ghLoading.set(false);
-          return;
-        }
-
-        const { project, tree } = res;
-
-        if (!project || !project.id) {
-          console.error('[GithubImport] Invalid response: missing project.id', res);
-          this.ghError.set('Invalid response: missing project data');
-          this.ghLoading.set(false);
-          return;
-        }
-
-        if (!Array.isArray(tree)) {
-          console.error('[GithubImport] Invalid response: tree is not an array', res);
-          this.ghError.set('Invalid response: expected tree array');
-          this.ghLoading.set(false);
-          return;
-        }
-
-        console.log('[GithubImport] SUCCESS projectId=' + project.id + ' files=' + tree.length);
-
-        const roots = [...this.fileTree()];
-
-        // Root folder that carries repo meta for preview + refresh
-        const ghRoot: FileNode = {
-          id: project.id, // Use persistence ID from backend
-          name: `From GitHub (${repo})`,
-          type: 'folder',
-          path: `from-github/${owner}/${repo}`,
-          expanded: true,
-          children: tree ?? [],
-          source: 'github',
-          githubMeta: { owner, repo, branch, subPath }
-        } as any;
-
-        roots.push(ghRoot);
-        this.fileTree.set(roots);
-
-        // ✅ Track GitHub project in ProjectStore (with file tree)
-        const fileCount = this.countFiles(tree ?? []);
-        this.projectStore.addOrUpdateProject({
-          id: project.id,
-          source: 'github',
-          displayName: `${owner}/${repo}`,
-          owner,
-          repo,
-          branch,
-          subPath,
-          fileCount,
-          lastUpdated: Date.now()
-        }, tree ?? []);
-
-        this.githubModalOpen.set(false);
-        this.ghLoading.set(false);
-      },
-      error: (err) => {
-        console.error('[GithubImport] HTTP Error:', err);
-
-        // Build detailed error message
-        let errorMsg = 'GitHub import failed';
-
-        if (err?.status === 401) {
-          this.githubConnected.set(false);
-          errorMsg = err?.error?.message || 'Not authenticated. Click "Connect GitHub" first.';
-        } else if (err?.status === 403) {
-          errorMsg = err?.error?.message || 'Access forbidden. Check repository permissions.';
-        } else if (err?.status === 404) {
-          errorMsg = err?.error?.message || 'Repository or branch not found.';
-        } else if (err?.status === 0) {
-          errorMsg = 'Network error: Cannot reach backend server at localhost:8081';
-        } else if (err?.error?.message) {
-          errorMsg = err.error.message;
-        } else if (err?.message) {
-          errorMsg = `Error: ${err.message}`;
-        } else if (err?.status) {
-          errorMsg = `HTTP ${err.status}: ${err.statusText || 'Unknown error'}`;
-        }
-
-        // Add code if available
-        if (err?.error?.code) {
-          errorMsg = `[${err.error.code}] ${errorMsg}`;
-        }
-
-        console.error('[GithubImport] Final error message:', errorMsg);
-        this.ghError.set(errorMsg);
-        this.ghLoading.set(false);
+    // Root folder that carries repo meta for preview + refresh
+    const ghRoot: FileNode = {
+      id: project.id,
+      name: `From GitHub (${project.githubRepo})`,
+      type: 'folder',
+      path: `from-github/${project.githubOwner}/${project.githubRepo}`,
+      expanded: true,
+      children: tree ?? [],
+      source: 'github',
+      githubMeta: {
+        owner: project.githubOwner,
+        repo: project.githubRepo,
+        branch: project.githubBranch,
+        subPath: undefined // subPath logic refined in backend to return filtered tree
       }
-    });
+    } as any;
+
+    roots.push(ghRoot);
+    this.fileTree.set(roots);
+
+    // ✅ Track GitHub project in ProjectStore (with file tree)
+    const fileCount = this.countFiles(tree ?? []);
+    this.projectStore.addOrUpdateProject({
+      id: project.id,
+      source: 'github',
+      displayName: `${project.githubOwner}/${project.githubRepo}`,
+      owner: project.githubOwner,
+      repo: project.githubRepo,
+      branch: project.githubBranch,
+      fileCount,
+      lastUpdated: Date.now()
+    }, tree ?? []);
+
+    this.githubWizardOpen.set(false);
+
+    if (indexingStarted) {
+      this.ragLog.set([...this.ragLog(), `Indexing started for ${project.displayName}...`]);
+      this.pollIndexing(project.id);
+    }
   }
 
   // ✅ Refresh a GitHub root folder (re-import same repo)
@@ -548,7 +502,7 @@ export class AppComponent implements OnInit {
         // Check for error response
         if ('code' in res && 'message' in res) {
           console.error('[GithubRefresh] Server returned error:', res);
-          this.ghError.set((res as any).message || 'Refresh failed');
+          // TODO: Use a global toast or error message signal
           return;
         }
 
@@ -556,7 +510,6 @@ export class AppComponent implements OnInit {
 
         if (!project || !Array.isArray(tree)) {
           console.error('[GithubRefresh] Invalid response structure');
-          this.ghError.set('Invalid response from server');
           return;
         }
 
@@ -589,15 +542,6 @@ export class AppComponent implements OnInit {
       },
       error: (err) => {
         console.error('[GithubRefresh] Error:', err);
-        let msg = 'Refresh failed';
-        if (err?.error?.message) {
-          msg = err.error.message;
-        } else if (err?.status === 401) {
-          msg = 'Authentication expired. Please reconnect GitHub.';
-        } else if (err?.message) {
-          msg = err.message;
-        }
-        this.ghError.set(msg);
       }
     });
   }
@@ -977,7 +921,7 @@ export class AppComponent implements OnInit {
 
     this.ragLog.set(['Initializing RAG query...']);
 
-    this.ragChat.chat({
+    const payload = {
       message: text,
       projectIds: allProjects,
       mode: mode,
@@ -997,7 +941,11 @@ export class AppComponent implements OnInit {
       chunkOverlap: this.idxOverlap(),
       topK: this.chatTopK(),
       model: model
-    }).subscribe({
+    };
+
+    console.log('[RagChat] Request:', JSON.stringify(payload, null, 2));
+
+    this.ragChat.chat(payload).subscribe({
       next: (res) => this.handleReply(res),
       error: (err) => this.handleError(err),
       complete: () => this.sending.set(false)
@@ -1070,8 +1018,8 @@ export class AppComponent implements OnInit {
     }
 
     if (fallbackTitle === 'GitHub import failed') {
-      this.ghError.set(msg);
-      this.ghLoading.set(false);
+      // Handled by wizard
+      // this.ghLoading.set(false);
     } else {
       alert(msg);
     }

@@ -1,13 +1,13 @@
 package com.ai.deepcode.controller;
 
 import com.ai.deepcode.dto.*;
-import com.ai.deepcode.entity.IndexStatus;
-import com.ai.deepcode.entity.IndexingStatus;
-import com.ai.deepcode.repository.IndexStatusRepository;
+import com.ai.deepcode.entity.*;
+import com.ai.deepcode.repository.*;
 import com.ai.deepcode.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -31,28 +31,37 @@ public class AiController {
 
     private final OllamaService ollamaService;
     private final WorkspaceStore workspaceStore;
-    private final GithubFileService githubFileService;
+    private final FileContentService fileContentService;
     private final VectorSearchService vectorSearchService;
     private final IndexingService indexingService;
     private final IndexStatusRepository indexStatusRepository;
+    private final ProjectFileRepository projectFileRepository;
+    private final ProjectRepository projectRepository;
+    private final ChunkRepository chunkRepository;
 
     public AiController(OllamaService ollamaService, WorkspaceStore workspaceStore,
-            GithubFileService githubFileService, VectorSearchService vectorSearchService,
-            IndexingService indexingService, IndexStatusRepository indexStatusRepository) {
+            FileContentService fileContentService, VectorSearchService vectorSearchService,
+            IndexingService indexingService, IndexStatusRepository indexStatusRepository,
+            ProjectFileRepository projectFileRepository, ProjectRepository projectRepository,
+            ChunkRepository chunkRepository) {
         this.ollamaService = ollamaService;
         this.workspaceStore = workspaceStore;
-        this.githubFileService = githubFileService;
+        this.fileContentService = fileContentService;
         this.vectorSearchService = vectorSearchService;
         this.indexingService = indexingService;
         this.indexStatusRepository = indexStatusRepository;
+        this.projectFileRepository = projectFileRepository;
+        this.projectRepository = projectRepository;
+        this.chunkRepository = chunkRepository;
     }
 
     @PostMapping("/chat")
-    public ChatResponse chat(@RequestBody ChatRequest request) {
-        log.info("[AiController] Received chat request: message='{}', context.mode='{}', model='{}'",
+    public ChatResponse chat(@RequestBody ChatRequest request, Authentication auth) {
+        log.info("[AiController] Received chat request: message='{}', context.mode='{}', model='{}', auth={}",
                 truncate(request.message(), 50),
                 request.context() != null ? request.context().mode() : "null",
-                request.model() != null ? request.model() : "default");
+                request.model() != null ? request.model() : "default",
+                auth != null ? auth.getClass().getSimpleName() : "null");
 
         if (request.context() != null && request.context().files() != null) {
             log.info("[AiController] Context files count: {}", request.context().files().size());
@@ -63,7 +72,7 @@ public class AiController {
             }
         }
 
-        String prompt = buildPrompt(request);
+        String prompt = buildPrompt(request, auth);
         log.info("[AiController] Built prompt length: {} chars", prompt.length());
 
         // Use the selected model or fall back to default
@@ -71,7 +80,7 @@ public class AiController {
         return new ChatResponse(answer);
     }
 
-    private String buildPrompt(ChatRequest request) {
+    private String buildPrompt(ChatRequest request, Authentication auth) {
         ChatRequest.Context ctx = request.context();
 
         // No context
@@ -88,18 +97,19 @@ public class AiController {
             for (String path : workspaceStore.getAllPaths()) {
                 allDeviceFiles.add(new ChatRequest.ContextFile("device", path, null));
             }
-            return buildPromptWithContextFiles(request.message(), allDeviceFiles);
+            return buildPromptWithContextFiles(request.message(), allDeviceFiles, auth);
         }
 
         if ("selected".equals(mode) && files != null && !files.isEmpty()) {
-            return buildPromptWithContextFiles(request.message(), files);
+            return buildPromptWithContextFiles(request.message(), files, auth);
         }
 
         // Fallback: just the message
         return request.message();
     }
 
-    private String buildPromptWithContextFiles(String userMessage, List<ChatRequest.ContextFile> files) {
+    private String buildPromptWithContextFiles(String userMessage, List<ChatRequest.ContextFile> files,
+            Authentication auth) {
         StringBuilder contextBuilder = new StringBuilder();
         StringBuilder failureReasons = new StringBuilder();
         int totalChars = 0;
@@ -119,7 +129,7 @@ public class AiController {
 
             // fetchFileContent may throw ResponseStatusException for GitHub auth issues
             // Let it propagate to return proper 401/403/404 to client
-            String content = fetchFileContent(file);
+            String content = fetchFileContent(file, auth);
 
             if (content == null) {
                 String reason = String.format("%s:%s (fetch failed)", file.source(), file.path());
@@ -202,26 +212,18 @@ public class AiController {
                 .formatted(contextBuilder.toString(), failureNote, userMessage);
     }
 
-    private String fetchFileContent(ChatRequest.ContextFile file) {
-        if ("device".equals(file.source())) {
-            return workspaceStore.getFileAsString(file.path());
-        }
-        if ("github".equals(file.source()) && file.github() != null) {
-            ChatRequest.GithubRef gh = file.github();
-            return githubFileService.getFileContent(gh.owner(), gh.repo(), file.path(), gh.branch(), gh.subPath());
-        }
-        return null;
+    private String fetchFileContent(ChatRequest.ContextFile file, Authentication auth) {
+        // ChatRequest still uses its own fetching or we can wrap it
+        RagFileRef ref = new RagFileRef(file.source(), file.path(),
+                file.github() != null
+                        ? new GithubRef(file.github().owner(), file.github().repo(), file.github().branch(),
+                                file.github().subPath())
+                        : null);
+        return fileContentService.fetchContent(ref, auth);
     }
 
-    private String fetchFileContent(RagFileRef file) {
-        if ("device".equals(file.source())) {
-            return workspaceStore.getFileAsString(file.path());
-        }
-        if ("github".equals(file.source()) && file.github() != null) {
-            GithubRef gh = file.github();
-            return githubFileService.getFileContent(gh.owner(), gh.repo(), file.path(), gh.branch(), gh.subPath());
-        }
-        return null;
+    private String fetchFileContent(RagFileRef file, Authentication auth) {
+        return fileContentService.fetchContent(file, auth);
     }
 
     private String buildFileHeader(ChatRequest.ContextFile file) {
@@ -255,13 +257,14 @@ public class AiController {
      * POST /api/ai/chat-rag
      */
     @PostMapping("/chat-rag")
-    public RagChatResponse chatWithRag(@RequestBody RagChatRequest request) {
-        log.info("[AiController] RAG chat request: strategy={}, message='{}', projects={}, topK={}, model='{}'",
+    public RagChatResponse chatWithRag(@RequestBody RagChatRequest request, Authentication auth) {
+        log.info("[AiController] RAG chat request: strategy={}, message='{}', projects={}, topK={}, model='{}', auth={}",
                 request.strategy(),
                 truncate(request.message(), 50),
                 request.projectIds() != null ? request.projectIds().size() : 0,
                 request.topK(),
-                request.model() != null ? request.model() : "default");
+                request.model() != null ? request.model() : "default",
+                auth != null ? auth.getClass().getSimpleName() : "null");
 
         // VALIDATION
         if (request.message() == null || request.message().isBlank()) {
@@ -325,12 +328,12 @@ public class AiController {
             Map<String, String> fileContents = new HashMap<>();
             List<RagFileRef> filesToFetch = ("selected".equalsIgnoreCase(request.mode()) && request.files() != null)
                     ? request.files()
-                    : getAllProjectFiles(mainProjectId);
+                    : getAllProjectFiles(mainProjectId, logEntries);
 
             logEntries.add("Fetching content for " + filesToFetch.size() + " files...");
             for (RagFileRef file : filesToFetch) {
                 try {
-                    String content = fetchFileContent(file);
+                    String content = fileContentService.fetchContent(file, auth);
                     if (content != null && !content.isEmpty()) {
                         fileContents.put(file.path(), content);
                     }
@@ -390,12 +393,58 @@ public class AiController {
                         logEntries));
     }
 
-    private List<RagFileRef> getAllProjectFiles(UUID projectId) {
-        List<RagFileRef> list = new ArrayList<>();
-        for (String path : workspaceStore.getAllPaths()) {
-            list.add(new RagFileRef("device", path, null));
+    private List<RagFileRef> getAllProjectFiles(UUID projectId, List<String> logEntries) {
+        List<ProjectFile> files = projectFileRepository.findByProjectId(projectId);
+        if (!files.isEmpty()) {
+            return files.stream()
+                    .map(pf -> new RagFileRef(
+                            pf.getSource(),
+                            pf.getPath(),
+                            pf.getGithubOwner() != null ? new GithubRef(
+                                    pf.getGithubOwner(),
+                                    pf.getGithubRepo(),
+                                    pf.getGithubBranch(),
+                                    pf.getGithubSubPath()) : null))
+                    .toList();
         }
-        return list;
+
+        // HEALING: Fallback for projects with missing metadata
+        log.warn("[AiController] No persisted files found for project {}, attempting recovery", projectId);
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null)
+            return Collections.emptyList();
+
+        List<RagFileRef> recovered = new ArrayList<>();
+        if ("device".equals(project.getSource())) {
+            for (String path : workspaceStore.getAllPaths()) {
+                recovered.add(new RagFileRef("device", path, null));
+            }
+            logEntries.add("Recovered " + recovered.size() + " files from workspace store.");
+        } else if ("github".equals(project.getSource())) {
+            // Recover from existing chunks to find paths
+            List<String> paths = chunkRepository.findDistinctFilePathsByProjectId(projectId);
+            log.info("[AiController] Recovered {} paths from existing chunks for GitHub project {}", paths.size(),
+                    projectId);
+            logEntries.add("Recovered " + paths.size() + " paths from existing chunks.");
+            for (String p : paths) {
+                recovered.add(new RagFileRef("github", p, new GithubRef(
+                        project.getGithubOwner(),
+                        project.getGithubRepo(),
+                        project.getGithubBranch(),
+                        null // subPath lost for legacy, but usually empty/root
+                )));
+            }
+        }
+
+        // If still empty and it's device, we already tried workspaceStore.
+        // If it's GitHub and we have no chunks, we can't recover without re-import.
+        if (recovered.isEmpty()) {
+            log.error("[AiController] FAILED to recover file list for project {}", projectId);
+        } else {
+            log.info("[AiController] Success: Recovered {} files for project {}", recovered.size(), projectId);
+        }
+
+        return recovered;
     }
 
     private String buildRagPrompt(String userMessage, String ragContext) {
